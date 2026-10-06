@@ -18,7 +18,9 @@
   证据：`packages/core/src/plugin/supervisor.ts:96-111`（`failures` 里塞入重复项，`state.status="failed"`）。
 - 同目录**双入口**（`packages/plugin/src/host.ts:43` 的 `server: entry(["server",""])` / `tui: entry(["tui"])`）：
   - `index.ts` = **server 入口**：拉注册表 → 注册 integration / provider / models。**不得触碰 `context.ui`**
-  - `tui.tsx` = **TUI 入口**：只注册 `/connect-providers` 命令与交互
+  - `tui.ts` = **TUI 入口**：只注册 `/connect-providers` 命令与交互；图层必须写 **`mode: "global"`**
+  （图层 mode 默认 `"base"`，而提示框 push 的是 `"composer"`／补全时 `"autocomplete"` → 漏了就会"插件 active 但看不到命令"；
+  证据：`packages/tui/src/context/keymap.tsx:209-214` + `component/prompt/autocomplete.tsx:474-483`）
 - **server 入口不得 import 任何 `@opencode/*`（实测踩坑，opencode 2.0.24）**：脚本安装的本地 server 插件拿不到
   `@opencode/plugin`，会以 `ResolveMessage: Cannot find package '@opencode/plugin'` 加载失败（`/api/plugin` 里 `status: failed`）。
   `@opencode/plugin/tui` **是**注入的，TUI 入口照常 import。运行时需要的都是普通值：

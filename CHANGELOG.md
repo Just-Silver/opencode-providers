@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+## [0.1.0-beta.1] - 2026-10-07
+
+### Fixed
+
+- **`/connect-providers` 在 TUI 里"看不见"**：命令图层漏写 `mode`，默认落到 `base`；而提示框打开时推的是 `composer`、
+  补全菜单可见时再推 `autocomplete` → 该图层不可达，命令不会进入补全列表（插件却是 `active`）。
+  改为 **`mode: "global"`**（内置插件的 slash 命令都这么写），并加 `palette: true` 让命令面板里也能搜到。
+  证据：`packages/tui/src/context/keymap.tsx:209-214`、`packages/tui/src/component/prompt/autocomplete.tsx:474-483`
+
+### Changed
+
+- `docs/opencode-commands.md` 补「漏写 `mode: \"global\"` → 命令注册了但看不见」的坑、证据与触发方式；
+  `README.md` 补 `/connect-providers` 的触发方式（补全菜单选中即执行／命令面板可搜）
+
 ## [0.1.0-beta.0] - 2026-10-07
 
 > 首个**预发布**版本：先发到 npm 的 `next` dist-tag 试装，稳定后再发 `latest`。
@@ -27,5 +41,6 @@
 - 插件源码从 `.opencode/plugins/opencode-providers/` 移到 `plugin/opencode-providers/`：仓库自身不再是插件发现根，避免在仓库里跑 opencode 时与全局安装的同 id 副本相撞（`Duplicate plugin ID` → 面板里一条 `failed`）
 - 安装后**通常无需重启**（插件目录被文件监视热重载），不再要求 `opencode service restart`
 
-[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.1.0-beta.0...HEAD
+[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.1.0-beta.1...HEAD
+[0.1.0-beta.1]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.1
 [0.1.0-beta.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.0

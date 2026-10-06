@@ -49,6 +49,8 @@ v2 里概念已从 "provider" 泛化为 "integration"（provider 只是其中一
 
 ```ts
 ctx.keymap.layer(() => ({
+  // ⚠️ 必须写 mode: "global"（默认是 "base"）—— 见下面「坑」一节，漏了就不会出现在补全列表里
+  mode: "global",
   commands: [
     {
       id: "my-plugin.refresh",
@@ -59,6 +61,23 @@ ctx.keymap.layer(() => ({
   ],
 }))
 ```
+
+### 坑：漏写 `mode: "global"` → 命令"注册了但看不见"（实测）
+
+- 图层 `mode` 的默认值是 **`"base"`**：`packages/tui/src/context/keymap.tsx:209-214`
+  （`...(mode === "global" ? {} : { mode: mode ?? MODE.base })`，`MODE.base = "base"`，`:41`）。
+- 输入框里实际生效的模式不是 `base`：`routes/session/composer/index.tsx` 在提示框打开时
+  `keymap.mode.push("composer")`；`component/prompt/autocomplete.tsx` 在补全菜单可见时再 push `"autocomplete"`。
+  （`ui/dialog.tsx` → `"modal"`，`component/session-tabs.tsx` → `"menu"`，`routes/session/form.tsx` → `FORM_MODE`。）
+- `base` 图层在 `composer`/`autocomplete` 模式下**不可达**；补全列表只收集可达命令
+  （`autocomplete.tsx:474-483` 遍历 `keymapCommands()`）→ 命令不出现。
+- 症状极具迷惑性：`/api/plugin` 里插件 `status: active`、TUI 也加载成功，就是**看不到命令**。
+- 正确做法：slash 命令图层写 **`mode: "global"`**（内置插件全部这么写，如
+  `feature-plugins/system/plugins.tsx`、`system/stats.tsx`、`prompt/btw.tsx`）。
+- 顺带：`palette: true` 让它同时进命令面板；`group` 决定面板分组。
+- 触发方式（与内置 `/connect` 一致）：**在补全菜单里选中即执行**（`onSelect: command.run`）；
+  若 `slash.arguments` 为假，手打 `/名字` 再回车会被当成普通文本（`prompt/index.tsx` 的回车优先级只认
+  `arguments: true` 的 keymap 命令与服务端命令）。
 
 ## 同名 slash 命令会怎样（能覆盖/补充 `/connect` 吗）
 

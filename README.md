@@ -83,6 +83,10 @@ pwsh -NoProfile -File .\install.ps1 -Local
 /models                   # 该供应商的模型随即出现在列表里
 ```
 
+- 触发方式与内置 `/connect` 相同：**在输入框敲 `/`，在补全菜单里选中它**（选中即执行）；
+  也可以在命令面板里搜 `Connect providers`（该命令注册了 `palette: true`）。
+  手打全名再回车**不会**触发（与 `/connect` 一致），因为无参数命令只走补全菜单。
+
 再运行一次可以添加第二个账号，或在已有账号之间切换。
 
 **为什么 `/models` 里一开始看不到新供应商**：provider 声明为 `activation: "auto"`，
