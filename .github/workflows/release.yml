@@ -1,0 +1,52 @@
+name: Release
+
+# 打 tag 触发：先把 CHANGELOG 的 [Unreleased] 整理成 ## [x.y.z] - YYYY-MM-DD，
+# 再 git tag vX.Y.Z && git push origin vX.Y.Z。
+# 本仓没有 package.json（只走脚本安装），所以单一版本源 = CHANGELOG。
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # gh release create 需要
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 校验 tag 与 CHANGELOG 一致
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          top="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
+          echo "tag=$version changelog_top=$top"
+          if [ -z "$top" ]; then
+            echo "::error::CHANGELOG.md 里找不到版本小节"
+            exit 1
+          fi
+          if [ "$version" != "$top" ]; then
+            echo "::error::tag v$version 与 CHANGELOG 顶部版本 $top 不一致；先整理 CHANGELOG 再打 tag"
+            exit 1
+          fi
+
+      - name: 从 CHANGELOG 提取 Release 内容
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          awk -v header="## [$version]" '
+            index($0, header) == 1 { found = 1; next }
+            found && (index($0, "## [") == 1 || index($0, "[") == 1) { exit }
+            found { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ ! -s release-notes.md ]; then
+            echo "::error::从 CHANGELOG 提取到的 Release 内容为空"
+            exit 1
+          fi
+          cat release-notes.md
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md

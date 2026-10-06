@@ -38,8 +38,11 @@
 
 # 发版
 
-- 版本单一事实源：暂无（仓库无 Release 时 `install.sh` / `install.ps1` 回退 `main`）
-- 未来加 Release 时，脚本已按「最新 Release tag → 回退 main」解析
+- **版本单一事实源 = `CHANGELOG.md`**（本仓**故意没有 `package.json`**）：`release.yml` 在 tag 触发时校验
+  `tag == CHANGELOG 顶部版本小节`，不一致即 fail；Release 正文从该小节提取（不是 `git log` 堆砌）
+- 流程：把 `CHANGELOG.md` 的 `[Unreleased]` 整理成 `## [x.y.z] - YYYY-MM-DD` → commit → `git tag vX.Y.Z` → `git push origin vX.Y.Z`
+- `install.sh` / `install.ps1` 取源：最新 Release tag 优先，仓库无 Release 时回退 `main`
+- `.github/workflows/ci.yml` 在 push main / PR 上跑 `node --test`
 
 # 运行与验证
 

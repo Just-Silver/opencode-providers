@@ -1,0 +1,22 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: node --test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node >= 23.6 默认启用 TS 类型擦除，测试直接用 .ts（与本地一致）
+          node-version: 24
+      - name: 单测（含随仓 registry.json 的 schema 校验）
+        run: node --test
