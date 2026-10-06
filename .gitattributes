@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell scripts must keep LF: they are piped to bash (`curl ... | bash`), and CRLF breaks the shebang
+*.sh text eol=lf

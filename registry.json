@@ -1,0 +1,49 @@
+{
+  "$schema": "./registry.schema.json",
+  "schemaVersion": 1,
+  "models": {
+    "example-chat": {
+      "name": "Example Chat",
+      "family": "example",
+      "limit": { "context": 131072, "output": 16384 },
+      "cost": { "input": 0.5, "output": 1.5 },
+      "tools": true,
+      "input": ["text"],
+      "output": ["text"]
+    },
+    "example-reasoner": {
+      "name": "Example Reasoner",
+      "family": "example",
+      "limit": { "context": 262144, "output": 65536 },
+      "cost": { "input": 1, "output": 4, "cache_read": 0.1 },
+      "tools": true,
+      "input": ["text", "image"],
+      "output": ["text"],
+      "reasoningField": "reasoning_content",
+      "variants": [{ "id": "low" }, { "id": "high" }]
+    }
+  },
+  "providers": {
+    "example": {
+      "name": "Example Gateway",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "baseURL": "https://llm.example.com/v1",
+      "keyLabel": "Paste API key",
+      "models": {
+        "example-chat": { "base": "example-chat" },
+        "example-reasoner-v2": {
+          "base": "example-reasoner",
+          "cost": { "input": 1.2, "output": 4.8, "cache_read": 0.12 }
+        }
+      }
+    },
+    "example-2": {
+      "name": "Example Gateway Two",
+      "package": "@opencode/ai/providers/openai-compatible",
+      "baseURL": "https://llm2.example.com/v1",
+      "models": {
+        "example-reasoner": { "base": "example-reasoner" }
+      }
+    }
+  }
+}

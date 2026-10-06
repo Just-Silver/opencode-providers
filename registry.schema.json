@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry.schema.json",
+  "title": "opencode-providers registry",
+  "type": "object",
+  "required": ["schemaVersion", "providers"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string" },
+    "schemaVersion": { "const": 1 },
+    "models": {
+      "description": "Provider-agnostic model facts, referenced by provider models through `base`.",
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/model" }
+    },
+    "providers": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/provider" }
+    }
+  },
+  "$defs": {
+    "status": { "enum": ["alpha", "beta", "deprecated", "active"] },
+    "limit": {
+      "type": "object",
+      "required": ["context", "output"],
+      "additionalProperties": false,
+      "properties": {
+        "context": { "type": "integer", "minimum": 1 },
+        "input": { "type": "integer", "minimum": 1 },
+        "output": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "cost": {
+      "type": "object",
+      "required": ["input", "output"],
+      "additionalProperties": false,
+      "properties": {
+        "input": { "type": "number", "minimum": 0 },
+        "output": { "type": "number", "minimum": 0 },
+        "cache_read": { "type": "number", "minimum": 0 },
+        "cache_write": { "type": "number", "minimum": 0 }
+      }
+    },
+    "variant": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "settings": { "type": "object" }
+      }
+    },
+    "modelFields": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "family": { "type": "string" },
+        "releaseDate": { "type": "string" },
+        "status": { "$ref": "#/$defs/status" },
+        "disabled": { "type": "boolean" },
+        "limit": { "$ref": "#/$defs/limit" },
+        "cost": { "$ref": "#/$defs/cost" },
+        "tools": { "type": "boolean" },
+        "input": { "type": "array", "items": { "type": "string" } },
+        "output": { "type": "array", "items": { "type": "string" } },
+        "reasoningField": { "type": "string" },
+        "maxTokensField": { "enum": ["max_tokens", "max_completion_tokens"] },
+        "variants": { "type": "array", "items": { "$ref": "#/$defs/variant" } }
+      }
+    },
+    "model": {
+      "allOf": [{ "$ref": "#/$defs/modelFields" }],
+      "required": ["limit"],
+      "unevaluatedProperties": false
+    },
+    "providerModel": {
+      "allOf": [{ "$ref": "#/$defs/modelFields" }],
+      "properties": {
+        "base": { "type": "string", "description": "Key in the top-level `models` map." },
+        "modelID": { "type": "string", "minLength": 1, "description": "Model or deployment ID sent upstream. Defaults to the map key." }
+      },
+      "unevaluatedProperties": false,
+      "anyOf": [{ "required": ["base"] }, { "required": ["limit"] }]
+    },
+    "provider": {
+      "type": "object",
+      "required": ["name", "package", "models"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "package": { "type": "string", "minLength": 1, "description": "Runtime provider package, e.g. @opencode/ai/providers/openai-compatible." },
+        "baseURL": { "type": "string" },
+        "settings": { "type": "object" },
+        "headers": { "type": "object", "additionalProperties": { "type": "string" } },
+        "keyLabel": { "type": "string", "description": "Label for the API-key prompt. Defaults to \"Paste API key\"." },
+        "models": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/$defs/providerModel" }
+        }
+      }
+    }
+  }
+}
