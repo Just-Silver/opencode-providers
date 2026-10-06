@@ -67,6 +67,8 @@
   opencode api delete /api/credential/<cred_id>     # 验证完清理，别留假凭据
   ```
 - 注册表没生效时先看 `/api/plugin` 的 `state.status`，再看 server 日志里的 `failed to load plugin ... cause=`
+- **在仓库里跑 opencode 会加载两次**：全局安装（`~/.config/opencode/plugins/`）+ 项目内 `.opencode/plugins/` 是同一 id，
+  按 boot 顺序**首见者生效**、后者按重复 id 上报失败；调试时只留一处可减少噪音
 
 # 文档索引（docs/）
 
