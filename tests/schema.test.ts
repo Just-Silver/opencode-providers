@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url"
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { parseRegistry, resolveModelSpec, SUPPORTED_SCHEMA_VERSION } from "../.opencode/plugins/opencode-providers/registry/schema.ts"
+import { parseRegistry, resolveModelSpec, SUPPORTED_SCHEMA_VERSION } from "../plugin/opencode-providers/registry/schema.ts"
 
 const minimal = {
   schemaVersion: SUPPORTED_SCHEMA_VERSION,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { loadRegistry, type RegistryCacheEntry } from "../.opencode/plugins/opencode-providers/registry/source.ts"
+import { loadRegistry, type RegistryCacheEntry } from "../plugin/opencode-providers/registry/source.ts"
 
 const VALID_BODY = JSON.stringify({
   schemaVersion: 1,

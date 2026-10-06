@@ -5,12 +5,17 @@ on:
     branches: ["main"]
   pull_request:
 
+# 同一分支上过时的运行直接取消（省 runner 分钟）
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  test:
-    name: node --test
+  quality:
+    name: 单测 + 版本一致性
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,5 +23,7 @@ jobs:
         with:
           # Node >= 23.6 默认启用 TS 类型擦除，测试直接用 .ts（与本地一致）
           node-version: 24
+      - name: 版本一致性（package.json == CHANGELOG 顶部）
+        run: node scripts/changelog.mjs check
       - name: 单测（含随仓 registry.json 的 schema 校验）
         run: node --test

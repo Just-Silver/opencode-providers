@@ -1,0 +1,47 @@
+{
+  "name": "@justsilver/opencode-providers",
+  "version": "0.1.0-beta.0",
+  "type": "module",
+  "description": "Register providers missing from the models.dev catalog in OpenCode V2 from a self-hosted registry — no opencode.json needed",
+  "license": "MIT",
+  "author": "Just-Silver",
+  "homepage": "https://github.com/Just-Silver/opencode-providers#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Just-Silver/opencode-providers.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Just-Silver/opencode-providers/issues"
+  },
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "plugin",
+    "provider",
+    "providers",
+    "models",
+    "gateway",
+    "llm"
+  ],
+  "main": "./plugin/opencode-providers/index.ts",
+  "exports": {
+    ".": "./plugin/opencode-providers/index.ts",
+    "./server": "./plugin/opencode-providers/index.ts",
+    "./tui": "./plugin/opencode-providers/tui.ts"
+  },
+  "files": [
+    "plugin/**/*.ts",
+    "!plugin/**/*.test.ts",
+    "CHANGELOG.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.24"
+  }
+}

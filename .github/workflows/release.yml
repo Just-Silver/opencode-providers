@@ -1,52 +1,116 @@
 name: Release
 
-# 打 tag 触发：先把 CHANGELOG 的 [Unreleased] 整理成 ## [x.y.z] - YYYY-MM-DD，
-# 再 git tag vX.Y.Z && git push origin vX.Y.Z。
-# 本仓没有 package.json（只走脚本安装），所以单一版本源 = CHANGELOG。
+# 发版策略：**预发布优先** —— 默认只发测试版到 npm 的 `next`，正式版必须手动确认才发 `latest`。
+#
+#   预发布（version 形如 0.1.0-beta.0）：push tag `v0.1.0-beta.0`，或手动 Run workflow 勾 publish
+#   正式版  （version 形如 0.1.0）      ：只能手动 Run workflow 勾 publish + stable
+#                                        —— 直接 push 一个正式 tag 会被这一步拦下
+#
+# 前置：npm 包必须已存在（首次发布人工 `npm publish` 一次），并已登记 Trusted Publisher（OIDC，无需长期 token）。
 on:
   push:
-    tags: ["v*"]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: '真的发布到 npm（不勾只做打包预检）'
+        type: boolean
+        default: false
+      stable:
+        description: '允许把正式版发到 latest（默认只发预发布到 next）'
+        type: boolean
+        default: false
+
+# 发布不可并行：排队串行，不取消
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
-  contents: write # gh release create 需要
+  contents: write   # 建/更新 GitHub Release
+  id-token: write   # npm Trusted Publishing（OIDC）
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: 校验 tag 与 CHANGELOG 一致
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: 单测
+        run: node --test
+
+      - name: 版本一致性（tag == package.json == CHANGELOG）
+        env:
+          TAG: ${{ github.event_name == 'push' && github.ref_name || '' }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          top="$(sed -n 's/^## \[\([0-9][0-9.]*\)\].*/\1/p' CHANGELOG.md | head -n1)"
-          echo "tag=$version changelog_top=$top"
-          if [ -z "$top" ]; then
-            echo "::error::CHANGELOG.md 里找不到版本小节"
-            exit 1
-          fi
-          if [ "$version" != "$top" ]; then
-            echo "::error::tag v$version 与 CHANGELOG 顶部版本 $top 不一致；先整理 CHANGELOG 再打 tag"
-            exit 1
+          if [ -n "$TAG" ]; then
+            node scripts/changelog.mjs check --tag "$TAG"
+          else
+            node scripts/changelog.mjs check
           fi
 
-      - name: 从 CHANGELOG 提取 Release 内容
+      - name: 从 CHANGELOG 提取 Release 正文
+        run: node scripts/changelog.mjs notes --out release-notes.md
+
+      - name: 发布到 npm（预发布 → next；正式版需手动确认 → latest）
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+          INPUT_STABLE: ${{ inputs.stable }}
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          awk -v header="## [$version]" '
-            index($0, header) == 1 { found = 1; next }
-            found && (index($0, "## [") == 1 || index($0, "[") == 1) { exit }
-            found { print }
-          ' CHANGELOG.md > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "::error::从 CHANGELOG 提取到的 Release 内容为空"
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+
+          publish=true
+          if [ "$EVENT" != "push" ]; then
+            publish="${INPUT_PUBLISH:-false}"
+          fi
+
+          if [ "$publish" != "true" ]; then
+            # 预检：只打包，不发布。
+            # 别用 `npm publish --dry-run`——它仍会向 registry 做「重复版本」校验，已发布时会直接报
+            # `You cannot publish over the previously published versions`。
+            echo "::notice::预检模式：只跑 npm pack --dry-run（不发布、不访问 registry）"
+            npm pack --dry-run
+            exit 0
+          fi
+
+          case "$version" in
+            *-*) tag=next ;;
+            *)   tag=latest ;;
+          esac
+
+          if [ "$tag" = "latest" ] && [ "${INPUT_STABLE:-false}" != "true" ]; then
+            echo "::error::${name}@${version} 是正式版：本流水线不允许直接发 latest，请到 Actions → Release → Run workflow 勾选 publish + stable"
             exit 1
           fi
-          cat release-notes.md
 
-      - name: 创建 Release
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "::notice::${name}@${version} 已存在于 registry → 跳过发布（版本号不可复用，请 bump）"
+            exit 0
+          fi
+
+          echo "→ npm publish --tag $tag（$name@$version）"
+          npm publish --tag "$tag"
+
+      - name: 建/更新 GitHub Release
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release edit "$tag" --title "$tag" --notes-file release-notes.md
+          else
+            gh release create "$tag" --title "$tag" --notes-file release-notes.md
+          fi

@@ -6,12 +6,15 @@
 ```
 registry.json                    ← 唯一事实源：供应商 + 模型 + 参数（GitHub raw 托管）
 registry.schema.json             ← 给编辑器校验 registry.json
-.opencode/plugins/opencode-providers/
+plugin/opencode-providers/       ← 插件源码（安装时整目录复制到 ~/.config/opencode/plugins/）
 ├── index.ts                     ← server 入口：拉注册表 → 注册 integration/provider/models
 ├── tui.tsx                      ← TUI 入口：注册 /connect-providers 命令
 ├── registry/                    ← 纯逻辑：schema 校验 / 元数据映射 / 拉取缓存
 └── view/                        ← /connect-providers 交互
 ```
+
+> 源码**故意不放在 `.opencode/plugins/` 下**：那样在本仓库里跑 opencode 时，仓库副本会和全局安装副本撞同一个插件 id，
+> 被 supervisor 判为 `Duplicate plugin ID: opencode-providers`，在 `/plugins` 面板里显示成一条 `failed`（实际加载的是另一条，功能正常）。
 
 ## 为什么需要它
 
@@ -20,6 +23,30 @@ OpenCode 的供应商清单来自 models.dev 目录，**目录里没有的供应
 本项目把这份数据搬到一份共享注册表里，由插件在运行期注册 —— 配置零增长，改注册表也不用改插件版本。
 
 ## 安装
+
+### 方式 A：npm 包（推荐）
+
+在 `opencode.json(c)` 里写一行（不需要手写 provider/模型）：
+
+```jsonc
+{
+  "plugins": ["@justsilver/opencode-providers"]
+}
+```
+
+想**试某个测试版**就把版本写全（试完再回到正式版）：
+
+```jsonc
+{
+  "plugins": ["@justsilver/opencode-providers@0.1.0-beta.0"]
+}
+```
+
+- 预发布版本发布在 npm 的 **`next`** dist-tag 上，正式版才发 `latest`。
+- 升级 / 卸载（`<目标>` 就是配置里那串原样）：`opencode plugin update @justsilver/opencode-providers` / `opencode plugin remove …`。
+- 本插件的 TUI 入口**不含 JSX**、不依赖 Solid，所以配置安装不会踩「双 Solid 运行时」的坑。
+
+### 方式 B：安装脚本（零依赖备用路径）
 
 ```bash
 # Linux / macOS
@@ -31,13 +58,23 @@ OpenCode 的供应商清单来自 models.dev 目录，**目录里没有的供应
 .\install.ps1
 ```
 
-脚本把 `.opencode/plugins/opencode-providers/` 整目录装到：
+脚本把 `plugin/opencode-providers/` 整目录装到：
 
 ```
 ~/.config/opencode/plugins/opencode-providers/        # $XDG_CONFIG_HOME 优先
 ```
 
-装完**重启 opencode**（或 `opencode service restart`）生效。卸载：`./uninstall.sh` / `.\uninstall.ps1`。
+装完**通常无需重启**（插件目录被文件监视，覆盖后自动热重载）；必要时 `opencode service restart`。
+卸载：`./uninstall.sh` / `.\uninstall.ps1`。
+
+开发时把**工作树**（含未提交改动）直接部署到全局插件目录：
+
+```bash
+bash install.sh --local
+```
+```powershell
+pwsh -NoProfile -File .\install.ps1 -Local
+```
 
 ## 使用
 
@@ -125,19 +162,21 @@ API Key 只在你贴入时经过本插件的内存，不落任何本项目自己
 ## 开发
 
 ```bash
-node --test        # 纯逻辑单测（Node ≥ 22 原生 TS，无需依赖）
+node --test                        # 纯逻辑单测（Node ≥ 22 原生 TS，无需依赖）
+node scripts/smoke-api.mjs --list  # 真机冒烟场景（HTTP，不需要 TUI）
+node scripts/smoke-api.mjs         # 全跑：插件已加载 / 供应商已注册 / 凭据→模型→清理
 ```
 
-两个入口的语法/打包检查：
+`smoke-api.mjs` 的鉴权自动读 `~/.local/state/opencode/service.json`；它的 `models` 场景会写入并删除一条
+临时凭据（label `smoke-throwaway`），且只对「当前没有任何凭据」的供应商生效。
+
+两个入口的打包/语法检查（两个入口都不 import 外部运行时依赖）：
 
 ```bash
-# server 入口：不 import 任何 @opencode/*，所以没有外部依赖（详见 AGENTS.md 的踩坑记录）
-npx --yes esbuild .opencode/plugins/opencode-providers/index.ts --bundle --platform=node --format=esm \
+npx --yes esbuild plugin/opencode-providers/index.ts --bundle --platform=node --format=esm \
   --outfile=dist/providers-server.js
 
-npx --yes esbuild .opencode/plugins/opencode-providers/tui.tsx --bundle --platform=node --format=esm \
-  --jsx=automatic --jsx-import-source=@opentui/solid \
-  --external:@opencode/plugin/tui --external:@opentui/solid --external:solid-js --external:@opencode/client \
+npx --yes esbuild plugin/opencode-providers/tui.ts --bundle --platform=node --format=esm \
   --outfile=dist/providers-tui.js
 ```
 
@@ -145,11 +184,24 @@ npx --yes esbuild .opencode/plugins/opencode-providers/tui.tsx --bundle --platfo
 验证是否真的注册成功（用 opencode 自己的 API，不需要看 TUI）：
 
 ```bash
-opencode api get /api/plugin        # 自己那条 state.status 必须是 active
+opencode api get /api/plugin        # 自己那条 state.status 必须是 active（多于 1 条 = 同 id 被发现两次）
 opencode api get /api/integration   # 注册的供应商（metadata.source = opencode-providers）
 opencode api get /api/model         # 只列可用供应商的模型；没配 key 时不会出现
 ```
 
-本项目**故意没有 `package.json`**：它只通过脚本安装（把插件目录复制到 `plugins/` 下），
-不发布 npm，也不支持走 `opencode.json` 的 `plugins` 配置安装（TUI 插件经配置安装会落在 `node_modules` 里，
-引入重复的 Solid 运行时，导致只渲染首帧）。
+**发布策略（预发布优先）**：`package.json` 的 `version` 是版本单一来源；
+预发布（如 `0.1.0-beta.0`）发到 npm 的 **`next`** dist-tag，正式版必须手动确认才发 `latest`。
+流水线：整理 `CHANGELOG.md` 的版本小节 → `npm version <x.y.z[-beta.n]> --no-git-tag-version` → commit →
+push tag `vX.Y.Z-beta.n`（或 Actions → Release → Run workflow 勾 `publish`；不勾只做 `npm pack --dry-run` 预检）。
+细节与出处见 `docs/npm-distribution-and-testing.md`。
+
+## 疑难解答
+
+| 现象 | 原因 / 处理 |
+|---|---|
+| `/plugins` 面板里本插件有**一条 `failed`** | 同一插件 id 被发现两次（例：脚本装到 `~/.config/opencode/plugins/` + 又在 `opencode.json` 里配了 npm 包，或某个项目的 `.opencode/plugins/` 里也有一份）。supervisor 保留首个、把后来者标成 `failed`，错误信息是 `Duplicate plugin ID: opencode-providers`。删掉多余的那份即可 |
+| `/connect-providers` 说没有可用供应商 | 注册表没加载成功。看 server 日志里的 `[opencode-providers]`，并确认 `/api/plugin` 里自己那条 `state.status` 是 `active` |
+| `/models` 里看不到新供应商 | 正常：`activation: "auto"`，在 `/connect-providers` 里存过 key 之后才会出现 |
+| 改了插件代码没生效 | 覆盖的是**全局**那份（`~/.config/opencode/plugins/opencode-providers/`）。开发时用 `install.ps1 -Local` / `install.sh --local` 把工作树复制过去 |
+
+验证命令见上面的「开发」小节。

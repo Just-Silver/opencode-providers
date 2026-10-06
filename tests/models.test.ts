@@ -1,8 +1,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { parseRegistry } from "../.opencode/plugins/opencode-providers/registry/schema.ts"
-import { buildProviderModels, buildProviderSettings } from "../.opencode/plugins/opencode-providers/registry/models.ts"
+import { parseRegistry } from "../plugin/opencode-providers/registry/schema.ts"
+import { buildProviderModels, buildProviderSettings } from "../plugin/opencode-providers/registry/models.ts"
 
 function registry() {
   const parsed = parseRegistry({
