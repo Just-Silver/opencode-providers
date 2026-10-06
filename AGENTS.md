@@ -65,7 +65,8 @@
 
 # 运行与验证
 
-- 单测：`node --test`（Node ≥ 22 原生 TS strip，零依赖；含 `scripts/changelog.mjs` 的工具测试）
+- 单测：`node --test`（Node ≥ 22 原生 TS strip，零依赖；含 `scripts/changelog.mjs` 的工具测试与
+  `tests/setup.test.ts` —— 走**真 server 入口 + 真注册表 + 假 ctx** 钉住「拉到什么就注册什么」的链路）
 - 真机冒烟（HTTP，不需要 TUI）：`node scripts/smoke-api.mjs --list` / `node scripts/smoke-api.mjs`
   （鉴权自动读 `~/.local/state/opencode/service.json`；`models` 场景会写一条临时凭据再删，只碰「当前无凭据」的 supplier）
 - 入口打包/语法检查（esbuild，`Done in` 即通过）：
