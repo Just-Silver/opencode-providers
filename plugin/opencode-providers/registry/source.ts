@@ -9,7 +9,8 @@
 import type { Registry } from "./schema.ts"
 import { parseRegistry } from "./schema.ts"
 
-export const DEFAULT_REGISTRY_URL = "https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry.json"
+export const DEFAULT_REGISTRY_URL =
+  "https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry/registry.json"
 
 /** Successful checks are trusted for 6h; a failed refresh keeps serving the cached copy. */
 export const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000

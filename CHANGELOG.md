@@ -7,6 +7,23 @@
 
 ## [Unreleased]
 
+## [0.1.0-beta.2] - 2026-10-07
+
+### Added
+
+- 注册表收入两家**真实供应商**：**Command Code**（`https://api.commandcode.ai/provider/v1`）与
+  **R4 Coder**（`https://api.r4.codes/v1`），共享 `deepseek-v4.1-flash` 参数
+  （context 1048576 / output 393216，`reasoningEffort` 变体 low/high/max）；
+  Command Code 用 `modelID` 覆盖成 `deepseek/deepseek-v4.1-flash`，R4 Coder 用默认（= map key）
+- `tests/registry.test.ts`：对随仓注册表断言这两家、共享 `base` 与 `modelID` 覆盖（CI 会跑）
+
+### Changed
+
+- **注册表挪出仓库根目录**：`registry.json` / `registry.schema.json` →
+  `registry/registry.json` / `registry/registry.schema.json`；插件默认拉取地址同步为
+  `…/main/registry/registry.json`。旧版本（beta.0/beta.1）拉旧地址会 404 → **沿用本地缓存**（不会清空列表，但不再更新），需升到本版
+- 注册表缓存按 URL 区分（`registry-cache:<url>`）：换 URL 不再等 TTL 就重新拉取
+
 ## [0.1.0-beta.1] - 2026-10-07
 
 ### Fixed
@@ -41,6 +58,7 @@
 - 插件源码从 `.opencode/plugins/opencode-providers/` 移到 `plugin/opencode-providers/`：仓库自身不再是插件发现根，避免在仓库里跑 opencode 时与全局安装的同 id 副本相撞（`Duplicate plugin ID` → 面板里一条 `failed`）
 - 安装后**通常无需重启**（插件目录被文件监视热重载），不再要求 `opencode service restart`
 
-[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.1.0-beta.1...HEAD
+[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.1.0-beta.2...HEAD
+[0.1.0-beta.2]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.1
 [0.1.0-beta.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.0

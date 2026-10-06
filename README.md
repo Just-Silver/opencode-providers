@@ -4,8 +4,8 @@
 装完插件、在 `/connect-providers` 里贴一次 API Key 就能用 —— **不需要写 `opencode.json`**。
 
 ```
-registry.json                    ← 唯一事实源：供应商 + 模型 + 参数（GitHub raw 托管）
-registry.schema.json             ← 给编辑器校验 registry.json
+registry/registry.json           ← 唯一事实源：供应商 + 模型 + 参数（GitHub raw 托管）
+registry/registry.schema.json    ← 给编辑器校验 registry.json
 plugin/opencode-providers/       ← 插件源码（安装时整目录复制到 ~/.config/opencode/plugins/）
 ├── index.ts                     ← server 入口：拉注册表 → 注册 integration/provider/models
 ├── tui.tsx                      ← TUI 入口：注册 /connect-providers 命令
@@ -98,7 +98,7 @@ API Key 只在你贴入时经过本插件的内存，不落任何本项目自己
 
 ## 维护注册表
 
-改 `registry.json` 提交后，运行中的 opencode 最迟 6 小时（TTL）自动跟上；想立刻生效就重启服务。
+改 `registry/registry.json` 提交后，运行中的 opencode 最迟 6 小时（TTL）自动跟上；想立刻生效就重启服务。
 拉取使用 `ETag`，内容没变时不会重复下载；网络失败时继续沿用本地缓存，不会把供应商列表清空。
 
 ### 结构
@@ -154,7 +154,7 @@ API Key 只在你贴入时经过本插件的内存，不落任何本项目自己
 | 模型 `variants` | `[{ "id": "high", "settings": {} }]` |
 | 模型 `status` / `disabled` | 生命周期标记；`disabled: true` 不出现在 `/models` |
 
-`registry.schema.json` 是同一份规则的 JSON Schema，编辑器可直接校验。
+`registry/registry.schema.json` 是同一份规则的 JSON Schema，编辑器可直接校验。
 
 ## 范围之外
 

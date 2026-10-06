@@ -23,7 +23,6 @@ import { DEFAULT_REGISTRY_URL, loadRegistry } from "./registry/source.ts"
 import type { RegistryCacheEntry } from "./registry/source.ts"
 
 const PLUGIN_ID = "opencode-providers"
-const CACHE_KEY = "registry-cache"
 
 /** Tags integrations so the TUI entry can recognise its own. */
 export const INTEGRATION_SOURCE = PLUGIN_ID
@@ -60,13 +59,15 @@ export default {
     // reachable through a config `plugins` entry (which we deliberately do not use for TUI plugins).
     // It exists for tests and forks; script installs always use DEFAULT_REGISTRY_URL.
     const url = typeof ctx.options.registryUrl === "string" ? ctx.options.registryUrl : DEFAULT_REGISTRY_URL
+    // Cache per URL: switching the registry URL must not keep serving the old body for a TTL.
+    const cacheKey = `registry-cache:${url}`
     const result = await loadRegistry({
       url,
       fetch: globalThis.fetch,
       store: {
-        get: async () => asCacheEntry(await ctx.storage.get(CACHE_KEY)),
+        get: async () => asCacheEntry(await ctx.storage.get(cacheKey)),
         set: async (entry) => {
-          await ctx.storage.set(CACHE_KEY, entry)
+          await ctx.storage.set(cacheKey, entry)
         },
       },
     })

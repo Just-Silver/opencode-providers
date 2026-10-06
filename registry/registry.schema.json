@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry.schema.json",
+  "$id": "https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry/registry.schema.json",
   "title": "opencode-providers registry",
   "type": "object",
   "required": ["schemaVersion", "providers"],

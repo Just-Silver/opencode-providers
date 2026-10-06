@@ -25,5 +25,5 @@ jobs:
           node-version: 24
       - name: 版本一致性（package.json == CHANGELOG 顶部）
         run: node scripts/changelog.mjs check
-      - name: 单测（含随仓 registry.json 的 schema 校验）
+      - name: 单测（含随仓 registry/registry.json 的 schema 校验）
         run: node --test

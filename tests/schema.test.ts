@@ -116,7 +116,7 @@ test("resolveModelSpec layers provider overrides over the shared model", () => {
 })
 
 test("shipped registry.json parses", () => {
-  const path = fileURLToPath(new URL("../registry.json", import.meta.url))
+  const path = fileURLToPath(new URL("../registry/registry.json", import.meta.url))
   const parsed = parseRegistry(JSON.parse(readFileSync(path, "utf8")))
   assert.equal(parsed.ok, true, parsed.ok ? "" : parsed.errors.join("\n"))
   if (parsed.ok) assert.ok(Object.keys(parsed.registry.providers).length > 0)

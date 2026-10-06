@@ -1,7 +1,7 @@
 # 项目定位
 
 `opencode-providers`：给 opencode 补上 **models.dev 目录里没有的供应商**。
-一份自维护注册表（`registry.json`，GitHub raw 托管）+ 一个 opencode 插件，实现**零 `opencode.json`** 接入。
+一份自维护注册表（`registry/registry.json`，GitHub raw 托管）+ 一个 opencode 插件，实现**零 `opencode.json`** 接入。
 
 # 语言规则
 
