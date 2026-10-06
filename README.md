@@ -131,13 +131,23 @@ node --test        # 纯逻辑单测（Node ≥ 22 原生 TS，无需依赖）
 两个入口的语法/打包检查：
 
 ```bash
+# server 入口：不 import 任何 @opencode/*，所以没有外部依赖（详见 AGENTS.md 的踩坑记录）
 npx --yes esbuild .opencode/plugins/opencode-providers/index.ts --bundle --platform=node --format=esm \
-  --external:@opencode/plugin --external:@opencode/client --outfile=dist/providers-server.js
+  --outfile=dist/providers-server.js
 
 npx --yes esbuild .opencode/plugins/opencode-providers/tui.tsx --bundle --platform=node --format=esm \
   --jsx=automatic --jsx-import-source=@opentui/solid \
   --external:@opencode/plugin/tui --external:@opentui/solid --external:solid-js --external:@opencode/client \
   --outfile=dist/providers-tui.js
+```
+
+改完插件文件**通常无需重启**：插件目录被文件监视，覆盖后自动热重载。
+验证是否真的注册成功（用 opencode 自己的 API，不需要看 TUI）：
+
+```bash
+opencode api get /api/plugin        # 自己那条 state.status 必须是 active
+opencode api get /api/integration   # 注册的供应商（metadata.source = opencode-providers）
+opencode api get /api/model         # 只列可用供应商的模型；没配 key 时不会出现
 ```
 
 本项目**故意没有 `package.json`**：它只通过脚本安装（把插件目录复制到 `plugins/` 下），

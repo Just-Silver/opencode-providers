@@ -14,6 +14,11 @@
 - 同目录**双入口**（`packages/plugin/src/host.ts:43` 的 `server: entry(["server",""])` / `tui: entry(["tui"])`）：
   - `index.ts` = **server 入口**：拉注册表 → 注册 integration / provider / models。**不得触碰 `context.ui`**
   - `tui.tsx` = **TUI 入口**：只注册 `/connect-providers` 命令与交互
+- **server 入口不得 import 任何 `@opencode/*`（实测踩坑，opencode 2.0.24）**：脚本安装的本地 server 插件拿不到
+  `@opencode/plugin`，会以 `ResolveMessage: Cannot find package '@opencode/plugin'` 加载失败（`/api/plugin` 里 `status: failed`）。
+  `@opencode/plugin/tui` **是**注入的，TUI 入口照常 import。运行时需要的都是普通值：
+  `Plugin.define` 是恒等函数（`export default { id, setup }`）、`Provider.ID.make`/`Integration.ID.make` 就是字符串、
+  `Provider.Info.empty(id)` = `{ id, name: id, activation: "auto", package: "" }`。类型可用 `import type` 或本地结构化接口。
 - 相对导入必须带显式扩展名（`./registry/schema.ts`）：server 插件由 bun 逐文件加载，TUI 侧同样；
   纯逻辑模块也要能被 `node --test` 原生 TS 解析
 - `registry/` 与 `view/` 视为插件子模块，只被两个入口 import
@@ -42,14 +47,23 @@
 - 入口打包/语法检查（esbuild，`Done in` 即通过）：
   ```
   npx --yes esbuild .opencode/plugins/opencode-providers/index.ts --bundle --platform=node --format=esm \
-    --external:@opencode/plugin --external:@opencode/client --outfile=dist/providers-server.js
+    --outfile=dist/providers-server.js            # server 入口无外部依赖，不需要 --external
   npx --yes esbuild .opencode/plugins/opencode-providers/tui.tsx --bundle --platform=node --format=esm \
     --jsx=automatic --jsx-import-source=@opentui/solid \
     --external:@opencode/plugin/tui --external:@opentui/solid --external:solid-js --external:@opencode/client \
     --outfile=dist/providers-tui.js
   ```
-- 安装后重启 opencode（或 `opencode service restart`），在 TUI 里运行 `/connect-providers`
-- 注册表没生效时先看 server 日志里的 `[opencode-providers] registry unavailable`
+- 安装后**通常无需重启**：覆盖插件目录里的文件会被文件监视热重载（实测 `/api/plugin` 立刻变为 `status=active`）；必要时再 `opencode service restart`
+- 验证注册真的生效（实测可用的证据链）：
+  ```
+  opencode api get  /api/plugin       # 自己那条必须 state.status=active、features.server=true
+  opencode api get  /api/integration  # methods 有 key、metadata.source=opencode-providers
+  opencode api get  /api/model        # 只列可用 provider 的模型（无凭据时 0 条）
+  opencode api get  /api/provider     # activation=auto / package / integrationID / settings.baseURL
+  opencode api post /api/integration/<id>/connect/key --data '{"key":"sk-test"}'
+  opencode api delete /api/credential/<cred_id>     # 验证完清理，别留假凭据
+  ```
+- 注册表没生效时先看 `/api/plugin` 的 `state.status`，再看 server 日志里的 `failed to load plugin ... cause=`
 
 # 文档索引（docs/）
 

@@ -311,5 +311,38 @@ OAuth 在 `resolve` 时若距 `expires` 不足 5 分钟会自动 refresh（`:696
 - provider 默认 `activation: "auto"`：无连接时不可见；想先选模型后连凭据就设 `"enabled"`。
 - `package` 用 V2 原生 `@opencode/ai/providers/*`，别用 `aisdk:`/`@ai-sdk/*`（旧写法，会被 rewrite）。
 - 模型清单来源要稳定：供应商 `/v1/models` 字段各家不同，可能要映射成 `Model.Info`（参考 `packages/core/src/modal/models.ts:96-151` 的 `build()` 合并写法）。
-- server 插件在**后台服务进程**里跑；改完插件需重启服务（`opencode service restart`）或让发现器重载。
+- server 插件在**后台服务进程**里跑；改完插件**通常会被文件监视热重载**（实测：覆盖 `index.ts` 后 `/api/plugin` 立即可见 `status=active`，无需重启），必要时才 `opencode service restart`。
 - 若供应商在 models.dev 目录里，其实连 provider/models 都不用注册，只需注册一个带 key 的 integration。
+
+## 实测踩坑：本地 server 插件**不能** import `@opencode/plugin`
+
+opencode **2.0.24** 实测：脚本安装到 `~/.config/opencode/plugins/<name>/` 的插件，若 `index.ts` 里写
+`import { Plugin, Provider, Integration } from "@opencode/plugin"`，加载直接失败：
+
+```
+/api/plugin → { state: { status: "failed", error: "Plugin failed to load", ref: "err_xxxx" } }
+日志 → failed to load plugin cause="ResolveMessage: Cannot find package '@opencode/plugin' imported from .../index.ts"
+```
+
+- `@opencode/plugin/tui` **是**注入的（TUI 入口照常写 `import { Plugin } from "@opencode/plugin/tui"`）；
+  服务端入口的 `@opencode/plugin` **不是**（历史上要落盘 `~/.config/opencode/node_modules/`）。
+- **解法：server 入口不 import 任何 `@opencode/*`。** 运行时需要的全是普通值：
+  - `Plugin.define` 就是恒等函数 → `export default { id, setup }` 即可
+  - `Provider.ID.make` / `Integration.ID.make` 运行时就是字符串
+  - `Provider.Info.empty(id)` = `{ id, name: id, activation: "auto", package: "" }`，反正每个字段都会被覆盖
+  - `import type` 会被擦除，所以类型可以照常写（或像本项目一样用结构化本地接口）
+- 同一目录双入口的实测结果：`/api/plugin` 里该条目 `features: { server: true, tui: true }`，一个目录同时被两个运行时接受。
+
+### 验证注册是否真的生效（可复用的证据链）
+
+```bash
+opencode api get /api/plugin      # 找自己那条：state.status 必须是 active（features.server=true）
+opencode api get /api/integration # 注册的 integration：methods 有 key、metadata.source 是标记
+opencode api get /api/model       # 只列**可用** provider 的模型；credential 前为空，连接后出现
+opencode api get /api/provider    # activation/package/integrationID/settings.baseURL
+opencode api post /api/integration/<id>/connect/key --data '{"key":"sk-test"}'
+opencode api delete /api/credential/<cred_id>   # 用完清理
+```
+
+实测 `activation: "auto"` + 无凭据 ⇒ `/api/model` 里 0 条；`POST .../connect/key` 后立刻出现该 provider 的模型
+（共享 `models` 表 + provider 覆盖都正确生效）；`DELETE` 凭据后又回到 0 条。

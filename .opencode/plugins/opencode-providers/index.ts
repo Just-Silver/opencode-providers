@@ -1,18 +1,23 @@
 /**
- * Server entry — the only place that touches `ctx.integration` / `ctx.provider`.
+ * Server entry — registers providers from the registry.
  *
- * Loads the registry (TTL + ETag + stale fallback) and registers, for every
- * provider in it:
- *   - an integration with a single `key` method, so it shows up in `/connect`
- *   - a provider (`activation: "auto"`) with its models
+ * IMPORTANT: this file deliberately imports **nothing** from `@opencode/*`.
+ * A locally installed server plugin does not get the plugin module injected
+ * (opencode 2.0.24 fails with `Cannot find package '@opencode/plugin'`), unlike
+ * `@opencode/plugin/tui` for TUI entries. Everything the runtime needs here is a
+ * plain value:
+ *   - `Plugin.define` is the identity function, so a default export is enough
+ *   - `Provider.ID.make` / `Integration.ID.make` are identity at runtime
+ *   - `Provider.Info.empty(id)` is `{ id, name: id, activation: "auto", package: "" }`
+ *     and every field is overridden below anyway
  *
- * Credentials are never touched here: opencode resolves them by matching
- * `provider.integrationID` to the integration the key was stored under.
- * No `env` method is declared on purpose — env is a silent, non-interactive
- * path and this plugin is `/connect`-only.
+ * It registers an integration (single `key` method) and a provider
+ * (`activation: "auto"`) per registry entry. Credentials are never touched:
+ * opencode injects them by matching `provider.integrationID` to the integration
+ * the key was stored under. No `env` method is declared on purpose — env is a
+ * silent, non-interactive path and this plugin is `/connect`-only.
  */
 
-import { Integration, Plugin, Provider } from "@opencode/plugin"
 import { buildProviderModels, buildProviderSettings } from "./registry/models.ts"
 import { DEFAULT_REGISTRY_URL, loadRegistry } from "./registry/source.ts"
 import type { RegistryCacheEntry } from "./registry/source.ts"
@@ -23,9 +28,34 @@ const CACHE_KEY = "registry-cache"
 /** Tags integrations so the TUI entry can recognise its own. */
 export const INTEGRATION_SOURCE = PLUGIN_ID
 
-export default Plugin.define({
+interface IntegrationRefLike {
+  id: string
+  name: string
+}
+
+interface IntegrationEditorLike {
+  update(id: string, update: (integration: IntegrationRefLike) => void): void
+  method: { update(input: { integrationID: string; method: { type: "key"; label?: string } }): void }
+}
+
+interface ProviderEditorLike {
+  add(input: { info: Record<string, unknown>; models: readonly Record<string, unknown>[] }): void
+}
+
+/** Only the members this plugin uses; see the file comment for why it is structural. */
+interface SetupContextLike {
+  readonly options: Readonly<Record<string, unknown>>
+  readonly storage: {
+    get(key: string): Promise<unknown>
+    set(key: string, value: unknown): Promise<void>
+  }
+  readonly integration: { transform(callback: (editor: IntegrationEditorLike) => void): Promise<unknown> }
+  readonly provider: { transform(callback: (editor: ProviderEditorLike) => void): Promise<unknown> }
+}
+
+export default {
   id: PLUGIN_ID,
-  async setup(ctx) {
+  async setup(ctx: SetupContextLike) {
     const url = typeof ctx.options.registryUrl === "string" ? ctx.options.registryUrl : DEFAULT_REGISTRY_URL
     const result = await loadRegistry({
       url,
@@ -33,7 +63,7 @@ export default Plugin.define({
       store: {
         get: async () => asCacheEntry(await ctx.storage.get(CACHE_KEY)),
         set: async (entry) => {
-          await ctx.storage.set(CACHE_KEY, entry as unknown as Parameters<typeof ctx.storage.set>[1])
+          await ctx.storage.set(CACHE_KEY, entry)
         },
       },
     })
@@ -43,7 +73,9 @@ export default Plugin.define({
       return
     }
     if (result.source === "stale-cache") {
-      console.warn(`[${PLUGIN_ID}] registry refresh failed; serving cache from ${new Date(result.fetchedAt).toISOString()}`)
+      console.warn(
+        `[${PLUGIN_ID}] registry refresh failed; serving cache from ${new Date(result.fetchedAt).toISOString()}`,
+      )
     }
 
     const { registry } = result
@@ -53,9 +85,9 @@ export default Plugin.define({
       for (const [id, provider] of entries) {
         editor.update(id, (integration) => {
           integration.name = provider.name
-          // `metadata` is part of the registry ref and surfaces in `Integration.Info`,
-          // but the plugin-facing `IntegrationRef` type only declares id/name.
-          ;(integration as { metadata?: Record<string, unknown> }).metadata = {
+          // `metadata` is part of the integration ref and surfaces in `Integration.Info`,
+          // but the plugin-facing ref type only declares id/name.
+          ;(integration as IntegrationRefLike & { metadata?: Record<string, unknown> }).metadata = {
             source: INTEGRATION_SOURCE,
             ...(provider.keyLabel === undefined ? {} : { keyLabel: provider.keyLabel }),
           }
@@ -74,21 +106,20 @@ export default Plugin.define({
         const settings = buildProviderSettings(provider)
         editor.add({
           info: {
-            ...Provider.Info.empty(Provider.ID.make(id)),
+            id,
             name: provider.name,
             activation: "auto",
-            integrationID: Integration.ID.make(id),
+            integrationID: id,
             package: provider.package,
             ...(settings === undefined ? {} : { settings }),
             ...(provider.headers === undefined ? {} : { headers: provider.headers }),
           },
-          // Structurally a `Model.Info`; the local shape exists only for testing.
           models,
-        } as never)
+        })
       }
     })
   },
-})
+}
 
 function asCacheEntry(value: unknown): RegistryCacheEntry | undefined {
   if (typeof value !== "object" || value === null) return undefined
