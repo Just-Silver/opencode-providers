@@ -364,6 +364,12 @@ opencode api delete /api/credential/<cred_id>   # 用完清理
 此后 `activation` 才会是 `auto`、`apiKey` 才不会被配置层注入，key 改为在 `/connect-providers` 里粘一次。
 反过来，某家若想继续用 `{env:…}`，就别写进注册表 —— **同 id 两边只留一边**。
 
+> 迁移注意：配置里的 `{env:…}` key **不会**自动搬进 opencode 的凭据表，删掉配置块后要重新粘一次
+> （TUI：`/` → 选中 `Connect providers`；等价命令：`opencode api post /api/integration/<id>/connect/key --data '{"key":"…","label":"<名字>"}'`）。
+> 实测（本机 2026-10-07）：删掉配置块 + 重载后 —— integration 两条都带我们的 `metadata.source`/`keyLabel`、
+> 无凭据时 `/api/model` 里两家各 0 条、都不进 `/api/provider` 的 available 列表；
+> 给 `r4-coder` 粘上 key 后它立刻出现在 `/api/model`（1 条），`command-code` 没 key 就仍是 0 条。
+
 > 安全提醒：把 `settings.apiKey` 写成 `{env:VAR}` 时，opencode 会把它**解析成明文**放进 provider settings
 > （`/api/provider` 里肉眼可见）。所以带 key 的 provider 不要留在 `opencode.json` 里给工具去读。
 
