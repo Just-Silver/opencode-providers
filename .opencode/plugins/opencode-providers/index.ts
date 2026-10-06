@@ -56,6 +56,9 @@ interface SetupContextLike {
 export default {
   id: PLUGIN_ID,
   async setup(ctx: SetupContextLike) {
+    // NOTE: discovered directory plugins are registered with `options: {}`, so this override is only
+    // reachable through a config `plugins` entry (which we deliberately do not use for TUI plugins).
+    // It exists for tests and forks; script installs always use DEFAULT_REGISTRY_URL.
     const url = typeof ctx.options.registryUrl === "string" ? ctx.options.registryUrl : DEFAULT_REGISTRY_URL
     const result = await loadRegistry({
       url,
