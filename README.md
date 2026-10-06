@@ -193,7 +193,8 @@ opencode api get /api/model         # 只列可用供应商的模型；没配 ke
 预发布（如 `0.1.0-beta.0`）发到 npm 的 **`next`** dist-tag，正式版必须手动确认才发 `latest`。
 流水线：整理 `CHANGELOG.md` 的版本小节 → `npm version <x.y.z[-beta.n]> --no-git-tag-version` → commit →
 push tag `vX.Y.Z-beta.n`（或 Actions → Release → Run workflow 勾 `publish`；不勾只做 `npm pack --dry-run` 预检）。
-细节与出处见 `docs/npm-distribution-and-testing.md`。
+**首个版本必须人工发一次**（OIDC/trusted publisher 挂不到尚不存在的包上），命令与核对项见
+`docs/npm-distribution-and-testing.md` §5。
 
 ## 疑难解答
 

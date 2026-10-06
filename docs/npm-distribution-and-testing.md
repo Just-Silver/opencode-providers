@@ -99,3 +99,66 @@ JSX 的 `import … from "@opentui/solid/jsx-runtime"` 是 Bun 转译时**注入
 但 `plugin check` / `plugin update` 的端到端验证在**共享 host server** 的机器上做不了
 （CLI 复用已在跑的 server，读真实全局配置，临时 `OPENCODE_CONFIG_HOME` / 隔离 HOME 都不生效）——
 要在**独立 HOME + 没有在跑的 server** 的干净环境里补测。这条与本插件无关（是宿主行为）。
+
+## 5. 首版发布：必须人工一次（本仓实测）
+
+**结论：npm 的 trusted publisher 关系挂在「已存在的包」上，所以第一个版本只能人工发一次。**
+
+本仓实测证据（GitHub Actions run `37545609151`，`workflow_dispatch` + `publish=true`）：
+
+```
+npm notice Publishing to https://registry.npmjs.org/ with tag next and public access
+npm error code E404
+npm error 404 Not Found - PUT https://registry.npmjs.org/@justsilver%2fopencode-providers
+npm error 404  The requested resource '@justsilver/opencode-providers@0.1.0-beta.0' could not be found
+               or you do not have permission to access it.
+```
+
+即 **OIDC 无法创建包**。同一台机器上走 token 的 `npm publish` 也发布不了：
+
+```
+npm error code EOTP
+npm error This operation requires a one-time password.
+npm error Open this URL in your browser to authenticate:  https://www.npmjs.com/auth/cli/***
+```
+
+- 该账号是 `auth-and-writes` 2FA：写入必须过浏览器授权；而**非交互 shell（agent 常用）拿到的 EOTP 链接被 `***` 打码**，没法转交给别人点。
+- npm 正在收紧「bypass 2FA 的 token 直接发布」（见 `https://gh.io/npm-gat-bypass2fa-deprecation`），别再指望长期 token。
+- 结论：**首版必须在自己的交互式终端里发**（浏览器点一下授权）；之后 CD 全自动。
+
+### 人工首发 runbook
+
+```bash
+cd <仓库根>
+node scripts/changelog.mjs check --tag v0.1.0-beta.0   # tag / package.json / CHANGELOG 三处一致
+npm whoami                                            # 应为 justsilver
+npm publish --tag next                                # 预发布 → next（不是 latest）
+```
+
+- 若提示 `EOTP` + 链接：浏览器打开并授权后**重跑**该命令；也可 `npm publish --tag next --otp=<6 位验证码>`。
+- 成功后核对（`latest` 应**不存在**）：
+  ```bash
+  npm view @justsilver/opencode-providers dist-tags    # { next: '0.1.0-beta.0' }
+  npm view @justsilver/opencode-providers versions
+  ```
+
+### 紧接着必须确认的两件事（否则 CD 仍可能发不出去）
+
+1. **trust 配置要显式允许 `npm publish`**：2026-09-03 之后新建的 trusted publisher **默认只允许 `npm stage publish`**（暂存发布、需人工批准）。
+   到 npm → 该包 → Settings → **Trusted publishing**：仓库 `Just-Silver/opencode-providers`、Workflow filename 必须正好是 `release.yml`（含 `.yml`）、
+   Environment 留空，并勾上允许 **`npm publish`**。npm 保存时**不校验**这些字段，写错只会在发布瞬间报错。
+2. **新 trust 配置 2 天有效期**：npm 文档写明「新建的 trusted publisher 配置必须**在 2 天内完成首次成功发布**来绑定仓库身份，否则过期且不可编辑（只能删掉重建）」。
+   所以包一存在就尽快跑一次 CD 发布，别拖。
+
+### 之后（全自动）
+
+```bash
+# 打测试版：bump 预发布号 → 提交 → push tag → CD 自动发到 next
+npm version prerelease --preid beta --no-git-tag-version
+git commit -am "chore(release): v0.1.0-beta.1" && git tag v0.1.0-beta.1 && git push origin main v0.1.0-beta.1
+
+# 或不起 tag，直接手动触发（同样只发 next、不碰 latest）
+gh workflow run release.yml -f publish=true
+```
+
+正式版：手动 Run workflow 且勾 `publish` + `stable`（push 一个正式 tag 会被流水线拦下）。
