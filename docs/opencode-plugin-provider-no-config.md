@@ -346,3 +346,25 @@ opencode api delete /api/credential/<cred_id>   # 用完清理
 
 实测 `activation: "auto"` + 无凭据 ⇒ `/api/model` 里 0 条；`POST .../connect/key` 后立刻出现该 provider 的模型
 （共享 `models` 表 + provider 覆盖都正确生效）；`DELETE` 凭据后又回到 0 条。
+
+### 坑：注册表里的 id 不能和 `opencode.json` 里已声明的 provider 撞名（实测）
+
+**现象**：注册表把 `command-code` / `r4-coder` 写进去了，插件是 `active`，但 `/api/integration` 里这两条
+**没有 `metadata.source`**、`methods[0].label` 还是默认的 `"Manually enter API Key"`（不是注册表里的 `keyLabel`），
+`/api/provider` 里它们显示 `activation: "enabled"`、`integrationID: undefined`。
+
+**根因**：`~/.config/opencode/opencode.json` 里已经用 `provider.<id>` 声明过同名供应商
+（`settings.apiKey: "{env:…}"`）。**配置声明的那份优先，插件贡献的 integration/provider 被盖住**
+（我们按注册表设置的 `metadata.source` / `keyLabel` / `activation: auto` / `integrationID` 都看不到）。
+
+**处理**：要真正走「注册表 + `/connect`」，就把 `opencode.json` 里这些 `provider.<id>` 整块删掉
+（key 改为在 `/connect-providers` 里粘一次，存进 opencode 自己的凭据表）；然后重启/重载让配置层生效。
+反过来，如果某家你想继续用 `{env:…}`（静默、非交互、不在 `/connect` 里展示），那就别把它写进注册表 —— 两边只留一边。
+
+**顺带两条实测**：
+- 注册表里**删掉**某个 provider 后，它的 integration 会在下一次插件激活时消失（不是残留）；同理**换注册表 URL**后
+  必须触发一次重载（改文件/重装/重启）才会用新地址拉取。旧 URL 404 时插件会沿用旧缓存，不会清空列表。
+- 插件**装载时**若注册表不可用（换 URL 后旧路径 404、且新 key 无缓存），setup 会 `console.error` 后**直接 return**：
+  插件仍显示 `active`，但**一条 integration 都不注册**（`/api/integration` 里自己的 0 条就是这个状态）。
+- 插件里的 `console.*` **不会**进 `~/.local/share/opencode/log/opencode.log`（实测），所以别靠日志看插件内部报错；
+  要复现「拉取+解析」是否正常，直接 `node -e` 调 `loadRegistry`（见 `registry/source.ts` 的注入式设计）。
