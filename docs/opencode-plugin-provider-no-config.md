@@ -347,24 +347,57 @@ opencode api delete /api/credential/<cred_id>   # 用完清理
 实测 `activation: "auto"` + 无凭据 ⇒ `/api/model` 里 0 条；`POST .../connect/key` 后立刻出现该 provider 的模型
 （共享 `models` 表 + provider 覆盖都正确生效）；`DELETE` 凭据后又回到 0 条。
 
-### 坑：注册表里的 id 不能和 `opencode.json` 里已声明的 provider 撞名（实测）
+### 坑：注册表里的 id 和 `opencode.json` 里已声明的 provider 撞名（实测，结论分两层）
 
-**现象**：注册表把 `command-code` / `r4-coder` 写进去了，插件是 `active`，但 `/api/integration` 里这两条
-**没有 `metadata.source`**、`methods[0].label` 还是默认的 `"Manually enter API Key"`（不是注册表里的 `keyLabel`），
-`/api/provider` 里它们显示 `activation: "enabled"`、`integrationID: undefined`。
+**实测现场**：注册表写了 `command-code` / `r4-coder`，`opencode.json` 里也声明了同名 `providers.<id>`（带 `settings.apiKey: "{env:…}"`）。
+插件重载后两边**同时生效且各管一半**：
 
-**根因**：`~/.config/opencode/opencode.json` 里已经用 `provider.<id>` 声明过同名供应商
-（`settings.apiKey: "{env:…}"`）。**配置声明的那份优先，插件贡献的 integration/provider 被盖住**
-（我们按注册表设置的 `metadata.source` / `keyLabel` / `activation: auto` / `integrationID` 都看不到）。
+| 维度 | 谁生效 | 证据 |
+|---|---|---|
+| integration 的 `metadata.source` / `keyLabel`、`methods` 的 key 标签 | **注册表（插件）** | `/api/integration` 里 `metadata:{source:"opencode-providers",keyLabel:"Paste Command Code API key"}`、`methods[0].label` = 我们的 |
+| provider 的 `activation` | **配置**（`enabled`，而不是我们的 `auto`） | `/api/provider` 显示 `activation:"enabled"` |
+| provider 的 `settings.apiKey` | **配置**（`{env:…}` 被解析成真实值 / 未设则为空串） | `/api/provider` 里能看到解析后的 key；`COMMAND_CODE_API_KEY` 未设时是空串 ⇒ 该 provider 现在其实是**发不出去请求**的 |
 
-**处理**：要真正走「注册表 + `/connect`」，就把 `opencode.json` 里这些 `provider.<id>` 整块删掉
-（key 改为在 `/connect-providers` 里粘一次，存进 opencode 自己的凭据表）；然后重启/重载让配置层生效。
-反过来，如果某家你想继续用 `{env:…}`（静默、非交互、不在 `/connect` 里展示），那就别把它写进注册表 —— 两边只留一边。
+后果：**模型会因为配置的 `activation: enabled` 而无凭据也可见**（`/api/model` 里就有），本插件 `auto` 语义（配了 key 才出现）对这两个 id 失效。
+
+**处理**：要完全走「注册表 + `/connect`」，就把 `opencode.json` 里那些 `providers.<id>` 整块删掉再重启/重载；
+此后 `activation` 才会是 `auto`、`apiKey` 才不会被配置层注入，key 改为在 `/connect-providers` 里粘一次。
+反过来，某家若想继续用 `{env:…}`，就别写进注册表 —— **同 id 两边只留一边**。
+
+> 安全提醒：把 `settings.apiKey` 写成 `{env:VAR}` 时，opencode 会把它**解析成明文**放进 provider settings
+> （`/api/provider` 里肉眼可见）。所以带 key 的 provider 不要留在 `opencode.json` 里给工具去读。
 
 **顺带两条实测**：
 - 注册表里**删掉**某个 provider 后，它的 integration 会在下一次插件激活时消失（不是残留）；同理**换注册表 URL**后
-  必须触发一次重载（改文件/重装/重启）才会用新地址拉取。旧 URL 404 时插件会沿用旧缓存，不会清空列表。
+  必须触发一次重载（改文件/重装/重启）才会用新地址。旧 URL 404 时插件沿用旧缓存，不会清空列表。
 - 插件**装载时**若注册表不可用（换 URL 后旧路径 404、且新 key 无缓存），setup 会 `console.error` 后**直接 return**：
   插件仍显示 `active`，但**一条 integration 都不注册**（`/api/integration` 里自己的 0 条就是这个状态）。
 - 插件里的 `console.*` **不会**进 `~/.local/share/opencode/log/opencode.log`（实测），所以别靠日志看插件内部报错；
   要复现「拉取+解析」是否正常，直接 `node -e` 调 `loadRegistry`（见 `registry/source.ts` 的注入式设计）。
+
+### 真机验证「注册表 → 注册」链路：探针注册表法（实测有效）
+
+当真实注册表的 id 与配置撞名、不好判定时，用**临时探针注册表**把链路钉一遍（不动用户配置、不动数据库）：
+
+1. 本地起一个只回一份 JSON 的 HTTP 服务（`registry.json` 里放一个不会撞名的 `probe-check` provider）；
+2. 只改**已安装副本**的 `registry/source.ts` 里的 `DEFAULT_REGISTRY_URL` → `http://127.0.0.1:<port>/registry.json`
+   （缓存键含 URL，所以等价于强制重新拉取，不必等 6h TTL）；
+3. 等文件监视热重载，然后断言：
+   - `/api/integration` 里出现 `probe-check`，且 `metadata.source`、`keyLabel`、`methods` 的 key 标签**都是注册表里的值**；
+   - 无凭据时该 provider 在 `/api/model` 里 **0 条**（`activation: auto` 生效）；
+   - `POST /api/integration/probe-check/connect/key` 后出现模型，且 `modelID` 覆盖 / `limit` / `variants` 与注册表一致；
+     同时 `/api/provider` 显示 `activation:"auto"`、`integrationID:"probe-check"`、`package`、`settings.baseURL`；
+   - `DELETE /api/credential/<id>` 后回到 0 条；
+4. 用 `install.sh --local` / `install.ps1 -Local` 覆盖回真实源码，再确认 `probe-check` 已消失。
+
+实测输出（2026-10-07）：
+
+```
+probe-check 已注册: {"name":"Probe Check","metadata":{"source":"opencode-providers","keyLabel":"Paste probe key"},
+                    "methods":[{"type":"key","label":"Paste probe key"}]}
+凭据前: probe-check 模型数 = 0
+凭据后: probe-check/probe-model modelID=probe/routed-model limit={"context":200000,"output":20000} variants=low,high
+provider: {"activation":"auto","integrationID":"probe-check","package":"@opencode/ai/providers/openai-compatible",
+           "baseURL":"http://127.0.0.1:45999/v1"}
+清理后: probe-check 模型数 = 0
+```

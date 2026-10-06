@@ -95,8 +95,9 @@
   插件被文件监视热重载为 `status=active`、集成仍在；安装后文件是 **CRLF**（`* text=auto` + 本机 `core.autocrlf=true`），
   **Bun 执行正常**（实测 active），只有 `*.sh` 被 `.gitattributes` 固定为 LF（因为要 `curl … | bash`）
 - 开发时把工作树部署到全局：`pwsh -NoProfile -File .\install.ps1 -Local` / `bash install.sh --local`（含未提交改动）
-- **注册表 id 与 `opencode.json` 里 `provider.<id>` 撞名时，配置那份赢**：插件的 `metadata.source`/`keyLabel`/`activation:auto`/`integrationID`
-  都被盖住（`/api/provider` 显示 `activation: enabled`、`integrationID: undefined`）。要么删掉配置里的那一块走注册表 + `/connect`，要么别写进注册表
+- **注册表 id 与 `opencode.json` 里 `providers.<id>` 撞名时会「各管一半」**：integration 的 `metadata.source`/`keyLabel`/`methods` 用注册表那份，
+  但 provider 的 `activation` 与 `settings.apiKey` 仍是配置那份（`enabled` + 明文 env key）⇒ 模型无凭据也可见、`auto` 语义失效。
+  要完全走注册表就删掉配置里那一块；只想用 `{env:…}` 就别写进注册表 —— 同 id 两边只留一边
 - 换注册表 URL / 删注册表条目后要**触发一次重载**才生效（改文件、重装、重启）；URL 404 时插件沿用旧缓存，但**新 key 无缓存时 setup 会直接 return**（插件 active 却注册 0 条）
 
 # 文档索引（docs/）
