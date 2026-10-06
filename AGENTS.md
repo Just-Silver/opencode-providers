@@ -100,6 +100,15 @@
   要完全走注册表就删掉配置里那一块；只想用 `{env:…}` 就别写进注册表 —— 同 id 两边只留一边
 - 换注册表 URL / 删注册表条目后要**触发一次重载**才生效（改文件、重装、重启）；URL 404 时插件沿用旧缓存，但**新 key 无缓存时 setup 会直接 return**（插件 active 却注册 0 条）
 
+# 技能（`.opencode/skills/`）
+
+- `opencode-providers-registry` —— 维护 `registry/registry.json`：两条路由（新增供应商 / 给已有供应商加模型）、
+  **最小字段铁律**（不写 `keyLabel`/`cost`/`tools`/`env`/`apiKey`…）、协议 → package（`/v1/chat/completions` /
+  `/v1/responses` / `/v1/messages` 三种形态）、**一次性用 `question` 收集信息**、改完必须 push + 触发重载 + 验证。
+- `.opencode/skills/` **不是**插件发现根（发现器只扫 `<config>/plugin`、`<config>/plugins`），放在这里安全。
+- 改这个技能要先做**基线对比测试**（无技能跑一遍看偏差 → 写/改技能 → 有技能再跑一遍），
+  已实测的偏差是「自行加 `keyLabel`、把参数硬抽到顶层 `models` + `base`」。
+
 # 文档索引（docs/）
 
 - `opencode-commands.md` —— 内置命令 vs 插件命令、同名冲突语义、插件注册命令/对话框的可用 API
