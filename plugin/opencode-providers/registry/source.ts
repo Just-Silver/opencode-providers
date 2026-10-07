@@ -14,7 +14,7 @@ export const DEFAULT_REGISTRY_URL =
 
 /** Successful checks are trusted for 6h; a failed refresh keeps serving the cached copy. */
 export const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000
-export const DEFAULT_TIMEOUT_MS = 10_000
+const DEFAULT_TIMEOUT_MS = 10_000
 
 export interface RegistryCacheEntry {
   readonly etag?: string

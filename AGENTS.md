@@ -79,7 +79,7 @@
   npx --yes esbuild plugin/opencode-providers/index.ts --bundle --platform=node --format=esm \
     --outfile=dist/providers-server.js            # server 入口无外部依赖，不需要 --external
   npx --yes esbuild plugin/opencode-providers/tui.ts --bundle --platform=node --format=esm \
-    --outfile=dist/providers-tui.js               # TUI 入口无 JSX，只有 @opencode/plugin/tui（注入）
+    --external:@opencode/plugin/tui --outfile=dist/providers-tui.js   # 注入包必须标 external，否则 esbuild 解析失败（实测 exit 1）
   ```
 - npm 打包预检（不发布）：`npm pack --dry-run`（确认 `plugin/**/*.ts` + CHANGELOG 进了 tarball）
 - 安装后**通常无需重启**：覆盖插件目录里的文件会被文件监视热重载（实测 `/api/plugin` 立刻变为 `status=active`）；必要时再 `opencode service restart`

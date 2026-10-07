@@ -24,8 +24,8 @@ import type { RegistryCacheEntry } from "./registry/source.ts"
 
 const PLUGIN_ID = "opencode-providers"
 
-/** Tags integrations so the TUI entry can recognise its own. */
-export const INTEGRATION_SOURCE = PLUGIN_ID
+/** Tags integrations so the TUI entry can recognise its own (TUI side keeps its own copy of this string). */
+const INTEGRATION_SOURCE = PLUGIN_ID
 
 interface IntegrationRefLike {
   id: string

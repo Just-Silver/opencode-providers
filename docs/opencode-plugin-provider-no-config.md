@@ -226,15 +226,25 @@ OpenCode 内部已有两种现成做法，可直接照抄：
 
 > 注意：TUI 入口与 server 入口是**两个进程**，但同一台机同一用户，数据目录路径一致，可共用同一份缓存文件。
 
-### 拉取 TTL 参考（官方既有数值）
+### 拉取 TTL 参考（官方既有数值，2026-10-07 复核）
 
-| 来源 | OpenCode 现值 | 依据 |
+| 来源 | OpenCode 现值 | 拉取方式 | 依据 |
+|---|---|---|---|
+| models.dev 目录（`<source>/api.json`） | **5 分钟** | **后台轮询** + KV 缓存(`updatedAt`+`digest`) + 内置快照兜底；10s 超时、瞬时错误退避重试 2 次 | `packages/core/src/models-dev.ts:330,345-352,385-401,412,433` |
+| Ollama / LM Studio / vLLM 本地发现 | **30 秒**（可配） | 后台轮询 + 内存 `checked` 判新 | `plugin/provider/local.ts:34,89,116`（ollama/lmstudio/vllm 都经它） |
+| DigitalOcean 模型列表 | **5 分钟** | 后台轮询 | `plugin/provider/digitalocean.ts:178` |
+| 插件版本检查（npm） | **24 小时** | 插件激活时 `check(target)`，可 `refresh:true` 强查 | `plugin/update.ts:9,39` |
+| ChatGPT 模型列表 | 15 分钟 | **已注释掉**（现在无轮询） | `plugin/provider/chatgpt.ts:345`（注释行） |
+
+**内核与本插件的机制差别（关键）**：
+
+| | opencode 内核（models.dev / 本地发现） | 本插件（注册表） |
 |---|---|---|
-| models.dev 目录 | **5 分钟**轮询 + KV 缓存(`updatedAt`) + 内置快照兜底 | `packages/core/src/models-dev.ts:319,392,401,422` |
-| Ollama / LM Studio / vLLM 本地发现 | **30 秒**（可配） | `plugin/provider/ollama.ts:55,181`、`lmstudio.ts:33,125`、`vllm.ts:22,110` |
-| DigitalOcean 模型列表 | **5 分钟** | `plugin/provider/digitalocean.ts:178` |
-| ChatGPT / Copilot 模型列表 | **15 分钟** | `plugin/provider/chatgpt.ts:339`（`Duration.minutes(15)`） |
-| 本插件现有更新检查 | 成功 24h / 失败冷却 1h | 本仓库 `update/index.ts` |
+| 触发 | **常驻定时轮询**（`Schedule.spaced(ttl)`），没人用也会醒 | **只在插件激活时判一次**，没有定时器 |
+| "TTL" 语义 | 轮询周期 **且** 缓存陈旧阈值（`updatedAt`/`checked`） | 只是**激活时刻**的陈旧阈值 |
+| 启动是否阻塞网络 | 不：文件 → KV ⇒ **打包快照** → 网络；有快照就永不请求 | 会：无缓存且拉不到 ⇒ setup `return`（0 条注册） |
+| 内容判重 | 响应体 **sha256 digest**（相同则连缓存都不写） | HTTP **`ETag`**（304 时用旧 body 并把 `fetchedAt` 顺延） |
+| 缓存位置 | 全局 KV（`kv` 表） | 同一个全局 KV（`plugin:<id>:registry-cache:<url>`） |
 
 建议：远端目录取 **15–60 分钟**（目录变化很慢；不必跟着内核 5 分钟）；本地运行时 30 秒；失败保留上次清单 + 冷却。
 
@@ -299,19 +309,19 @@ integration，见 `view/connect.ts:113-117`），CLI/其它客户端同理 —�
 node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.env.USERPROFILE+'\\.local\\share\\opencode\\opencode.db',{readOnly:true});const ns='plugin:'+[...'opencode-providers'].map(c=>c.charCodeAt(0).toString(16).padStart(4,'0')).join('')+':';for(const r of db.prepare('SELECT key,value FROM kv WHERE key LIKE ?').all(ns+'%')){const v=JSON.parse(r.value);console.log(r.key.slice(ns.length),'|',new Date(v.fetchedAt).toISOString(),'|',v.etag)}"
 ```
 
-本机实测（2026-10-07）输出，可见**三条**（前两条是死行，见下）：
+本机实测（2026-10-07，**清理后**）只剩当前生效的那一条：
 
 ```
-registry-cache                                                                          | 2026-10-06T21:55:38.569Z | W/"6d15..."
-registry-cache:http://127.0.0.1:45999/registry.json                                      | 2026-10-06T23:40:21.142Z | "probe"
 registry-cache:https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry/registry.json | 2026-10-06T23:40:55.419Z | W/"8638..."
 ```
 
-- 第 1 条无 URL 后缀 = **早期版本（键里还没有 URL 那版）留下的死行**，0.1.0 只读带 URL 的键，永不再用；
-- 第 2 条是「探针注册表法」留下的死行（见下节），同样不会被读；
-- 第 3 条才是当前生效的（内容 = `command-code` / `r4-coder`）。
-  这两条死行无害（每次 setup 只多一次 `kv.get`），想清可直接 `DELETE FROM kv WHERE key LIKE '<ns>%' AND instr(key, '/') = 0` 之类；
-  **但别在有进程运行时手工写库** —— 那正是本节开头提到的只读观测更安全的原因。
+曾存在、已清掉的两条死行（`DELETE FROM kv WHERE key = ?`，`changes=1` 各一条）：
+
+- `registry-cache`（**无 URL 后缀**）= 早期版本（键里还没有 URL 那版）留下的，0.1.0 只读带 URL 的键，永不再用；
+- `registry-cache:http://127.0.0.1:45999/registry.json` = 「探针注册表法」（见下节）留下的缓存行，同样不会被读。
+
+> 教训：探针法**只清源码不够**，拉取过的 URL 会在 `kv` 里留一条永久行；收尾必须按 key 删掉（见下节第 5 步）。
+> 写库要有进程在跑时做，单条 `DELETE` 很安全，但别做批量改写。日常观测一律用上面的只读命令。
 
 ## 凭据存哪 / 怎么注入（不需要插件动手）
 
@@ -465,6 +475,11 @@ opencode api delete /api/credential/<cred_id>   # 用完清理
      同时 `/api/provider` 显示 `activation:"auto"`、`integrationID:"probe-check"`、`package`、`settings.baseURL`；
    - `DELETE /api/credential/<id>` 后回到 0 条；
 4. 用 `install.sh --local` / `install.ps1 -Local` 覆盖回真实源码，再确认 `probe-check` 已消失。
+5. **删掉探针留下的缓存行**（否则 `kv` 里永久多一条死行，见上一节的教训）：
+
+   ```bash
+   node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.env.USERPROFILE+'\\.local\\share\\opencode\\opencode.db');const ns='plugin:'+[...'opencode-providers'].map(c=>c.charCodeAt(0).toString(16).padStart(4,'0')).join('')+':';console.log(db.prepare('DELETE FROM kv WHERE key = ?').run(ns+'registry-cache:http://127.0.0.1:45999/registry.json'))"
+   ```
 
 实测输出（2026-10-07）：
 

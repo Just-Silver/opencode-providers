@@ -123,16 +123,11 @@ function credentialConnections(integration: IntegrationInfo): Array<Extract<Conn
 }
 
 function footer(integration: IntegrationInfo): string | undefined {
-  const pending = integration.connections.find((connection) => pendingUrl(connection) !== undefined)
-  if (pending) return "Sign in required →"
+  // Key-only by design (the registry only ever declares a `key` method), so there is
+  // no OAuth "pending" connection to advertise here — only existing account labels.
   const credentials = credentialConnections(integration)
   if (credentials.length === 0) return undefined
   return credentials.map((credential) => credential.label).join(", ")
-}
-
-function pendingUrl(connection: Connection): string | undefined {
-  const status = (connection as { readonly status?: { readonly url?: string } }).status
-  return status?.url
 }
 
 function message(error: unknown): string {
