@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-07
+
 ### Added
 
 - `/connect-providers` 弹窗新增**强制刷新**：footer 动作 + 快捷键 `ctrl+r`（与内置弹窗一致的键位提示），
