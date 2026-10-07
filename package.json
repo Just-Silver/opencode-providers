@@ -1,6 +1,6 @@
 {
   "name": "@justsilver/opencode-providers",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "Register providers missing from the models.dev catalog in OpenCode V2 from a self-hosted registry — no opencode.json needed",
   "license": "MIT",
@@ -27,7 +27,8 @@
   "exports": {
     ".": "./plugin/opencode-providers/index.ts",
     "./server": "./plugin/opencode-providers/index.ts",
-    "./tui": "./plugin/opencode-providers/tui.ts"
+    "./tui": "./plugin/opencode-providers/tui.ts",
+    "./rpc": "./plugin/opencode-providers/rpc.ts"
   },
   "files": [
     "plugin/**/*.ts",

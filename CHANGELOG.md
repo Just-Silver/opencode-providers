@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-07
+
+### Fixed
+
+- npm 安装时 `/plugins` 缺少 `rpc` 能力标志：`package.json` 补 `exports["./rpc"]`，让 npm 安装与脚本安装一致
+  （强制刷新本身在两种安装下都可用——`features.rpc` 只是展示标志，opencode 未用它做门禁）
+
 ## [0.2.0] - 2026-10-07
 
 ### Added
