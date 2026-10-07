@@ -63,16 +63,18 @@ provider 级 → `name`、`package`、`baseURL`、`models`；模型级 → `name
 }
 ```
 
-## 协议 → package（3 种形态）
+## 协议 → package（3 种形态，默认第一个）
+
+**默认 `@opencode/ai/providers/openai-compatible`** —— 用户没特别说明协议时就用它。
 
 判据：**看上游文档 curl 示例的路径**，不是看模型名字。V1 文档原话（`packages/web/src/content/docs/providers.mdx:2506`）：
 「`@ai-sdk/openai-compatible` … **for `/v1/chat/completions`**；若用 `/v1/responses` 则用 `@ai-sdk/openai`」——V2 按同样的路径区分。
 
 | 上游请求路径（形态） | package |
 |---|---|
-| `/v1/chat/completions`（OpenAI **chat**，多数网关默认） | `@opencode/ai/providers/openai-compatible` |
-| `/v1/responses`（OpenAI **responses**） | `@opencode/ai/providers/openai-compatible/responses`（OpenAI 官方端点用 `@opencode/ai/providers/openai/responses`） |
-| `/v1/messages`（Anthropic **messages**） | `@opencode/ai/providers/anthropic-compatible`（Anthropic 自家 API 用 `@opencode/ai/providers/anthropic`） |
+| `/v1/chat/completions`（OpenAI **chat**，**默认**） | `@opencode/ai/providers/openai-compatible` |
+| `/v1/responses`（OpenAI **responses**） | `@opencode/ai/providers/openai-compatible/responses`（OpenAI 官方端点/需要原生行为用 `@opencode/ai/providers/openai/responses`） |
+| `/v1/messages`（Anthropic **messages**） | `@opencode/ai/providers/anthropic-compatible`（Anthropic 官方/需要原生行为用 `@opencode/ai/providers/anthropic`） |
 
 拿不准就问用户：「上游是 `/v1/chat/completions`、`/v1/responses` 还是 `/v1/messages`？」
 
@@ -80,10 +82,12 @@ provider 级 → `name`、`package`、`baseURL`、`models`；模型级 → `name
 `google-vertex`、`azure`、`amazon-bedrock`、`openai`（原生）、`xai`、`openrouter` 等，完整清单见官方文档
 <https://opencode.ai/v2/docs/providers/#packages>。
 
-> 已核实（`@opencode/ai` **2.0.24** 源码）：上面三个入口文件 `providers/openai-compatible.ts`、
-> `providers/openai-compatible/responses.ts`、`providers/anthropic-compatible.ts` 都存在；
-> 分别走 `protocols/openai-compatible-chat`、`protocols/openai-compatible-responses`、`protocols/anthropic-messages`。
-> （`openai` / `openai/chat` / `openai/responses` / `anthropic` / `google` / `google-vertex` 也都在。）
+> 已核实（**2.0.24**，三层一致）：
+> ① 本机源码 `packages/ai/src/providers/{openai-compatible.ts, openai-compatible/responses.ts, anthropic-compatible.ts}` 都在，
+> 分别走 `protocols/openai-compatible-chat`、`protocols/openai-compatible-responses`、`protocols/anthropic-messages`；
+> ② 发布到 npm 的 `@opencode/ai@2.0.24` 里 `exports["./*"] → ./dist/*.js`，对应产物
+> `dist/providers/{openai-compatible.js, openai-compatible/responses.js, anthropic-compatible.js}` 都存在
+> —— 也就是 registry 的 `package` 字段在**运行期**能解析（宿主按 `@opencode/ai/<子路径>` import）。
 
 ## 同一模型被多家共用：顶层 `models` + `base`
 
