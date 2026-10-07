@@ -264,6 +264,15 @@ OpenCode 内部已有两种现成做法，可直接照抄：
 > 把 TTL 压到 1ms 才 `source = "network"`、调用 1 次；过期后服务端回 304 则仍是 `cache`（调用 1 次但**不下 body**，
 > 并把 `fetchedAt` 顺延再管 6h）。
 
+**谁来拉**：只有 **server 入口**（`index.ts`）读注册表 —— 即承载它的 **service 常驻进程**。TUI 入口（`tui.ts`）
+**完全不读注册表**（只注册 `/connect-providers`，命令里通过 `ctx.data.location.integration.list()` 读服务端**已注册**的
+integration，见 `view/connect.ts:113-117`），CLI/其它客户端同理 —— 所以**开多少次 TUI 都不会多拉一次**。
+缓存行在全局 `kv` 表（跨 location、跨进程），多个触发并发时最多"几乎同时发两条"，同样无害。
+
+另一次实测（2026-10-07，本机）：service 进程 `StartTime = 05:53` 本地，而缓存行 `fetchedAt = 07:40` 本地
+（**晚了 1h47m**，因为期间发生过插件重载）→ 证明**"启动"不是唯一触发点**，重载也会走一次 `setup()`；
+而随后 08:07 那次重载（换成 npm `0.1.0` 的新代）**没有重写缓存行** → TTL 内零网络。两个方向都钉住了。
+
 `loadRegistry` 里**不直接返回缓存、而去发网络请求**的情况，只有这几种：
 
 | 条件 | 结果 |
