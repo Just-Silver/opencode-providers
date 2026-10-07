@@ -46,12 +46,12 @@ registry/
       provider.json                # 供应商参数
       models.json                  # 该家模型
   models/                          # 顶层共享模型（厂商无关事实）
-    <family>/<model>.json
+    <lab>/<model>.json
 ```
 
 - **模型 key = `models.json` 里的对象键**，不写 `id` 字段（对齐 models.dev「filename 即 id」）。
 - 路径段规则（**Windows 可 checkout**，吸取 models.dev 在 Windows 上 checkout 失败的教训）：
-  `<id>` / `<family>` / `<model>` 均须匹配 `^[A-Za-z0-9][A-Za-z0-9._-]*$`（禁 `/ \ : * ? " < > |` 及空白）。
+  `<id>` / `<lab>` / `<model>` 均须匹配 `^[A-Za-z0-9][A-Za-z0-9._-]*$`（禁 `/ \ : * ? " < > |` 及空白）。
   → 因此模型参数全部收在**单个 `models.json`** 里（不再为每个模型建目录），从根上避免文件名问题。
 
 `providers/<id>/provider.json`（最小字段）：
@@ -73,7 +73,7 @@ registry/
 }
 ```
 
-`models/<family>/<model>.json`（`RegistryModel`：name/family/limit/cost/tools/input/output/variants/…）：
+`models/<lab>/<model>.json`（`RegistryModel`：name/family/limit/cost/tools/input/output/variants/…；注意 `family` 是**文件内字段**，与路径段 `<lab>` 不是一回事）：
 
 ```jsonc
 { "name": "Deepseek V4.1 Flash", "family": "deepseek", "limit": { "context": 1048576, "output": 393216 },
@@ -97,8 +97,8 @@ registry/
 
 ## 5. 共享模型与 `base` 引用
 
-- 保留顶层共享表：`models/<family>/<model>.json`。
-- provider 模型用 `base: "<family>/<model>"` 引用，指向 `models/<family>/<model>.json`（对齐 models.dev 的 `base_model`）。
+- 保留顶层共享表：`models/<lab>/<model>.json`。
+- provider 模型用 `base: "<lab>/<model>"` 引用，指向 `models/<lab>/<model>.json`（对齐 models.dev 的 `base_model`；路径第一段是 **lab id**，`family` 只是 lab 模型内的字段，别混）。
 - **只按需拉取**：聚合时收集provider 模型里出现的唯一 `base`，逐个拉对应文件；不列全、不拉未被引用的。
 - 单家独有模型一律**内联**在 `providers/<id>/models.json`，不硬抽到顶层。
 
@@ -192,7 +192,7 @@ TUI（`view/connect.ts`）：
 | `list` / `search` / `show` | 遍历 `providers/*/`（读 `provider.json` + `models.json`）与 `models/**`；agent 不读整份 |
 | `add-provider …` | 建 `providers/<id>/provider.json` + `models.json`，并把 `<id>` 写入 `index.json` |
 | `add-model …` | 写入 `providers/<id>/models.json`（同 key 冲突报错） |
-| `add-shared-model …` | 写入 `models/<family>/<model>.json` |
+| `add-shared-model …` | 写入 `models/<lab>/<model>.json` |
 | `validate` | 聚合后过 `parseRegistry`；并校验「`index.json` 的 id 集合 == `providers/*/` 实际目录集合」与 `revision` 一致 |
 
 - 所有写命令仍在落盘前校验；写完**重算 `revision`** 并重写 `index.json`。
