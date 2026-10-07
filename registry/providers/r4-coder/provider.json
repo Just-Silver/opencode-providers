@@ -1,0 +1,6 @@
+{
+  "name": "R4 Coder",
+  "package": "@opencode/ai/providers/openai-compatible",
+  "baseURL": "https://api.r4.codes/v1",
+  "keyLabel": "Paste R4 Coder API key"
+}

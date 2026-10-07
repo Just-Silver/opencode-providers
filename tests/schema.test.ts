@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs"
-import { fileURLToPath } from "node:url"
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { buildRegistry, parseManifest } from "../plugin/opencode-providers/registry/aggregate.ts"
 import { parseRegistry, resolveModelSpec, SUPPORTED_SCHEMA_VERSION } from "../plugin/opencode-providers/registry/schema.ts"
 
 const minimal = {
@@ -115,9 +115,16 @@ test("resolveModelSpec layers provider overrides over the shared model", () => {
   assert.deepEqual(resolved?.cost, { input: 1, output: 2 })
 })
 
-test("shipped registry.json parses", () => {
-  const path = fileURLToPath(new URL("../registry/registry.json", import.meta.url))
-  const parsed = parseRegistry(JSON.parse(readFileSync(path, "utf8")))
+test("shipped split registry aggregates and parses", async () => {
+  const root = new URL("../registry/", import.meta.url)
+  const read = (rel: string): unknown => JSON.parse(readFileSync(new URL(rel, root), "utf8"))
+  const manifest = parseManifest(read("index.json"))
+  assert.equal(manifest.ok, true, manifest.ok ? "" : manifest.errors.join("\n"))
+  if (!manifest.ok) return
+  const built = await buildRegistry(manifest.manifest, async (rel) => read(rel))
+  assert.equal(built.ok, true, built.ok ? "" : built.errors.join("\n"))
+  if (!built.ok) return
+  const parsed = parseRegistry(built.registry)
   assert.equal(parsed.ok, true, parsed.ok ? "" : parsed.errors.join("\n"))
   if (parsed.ok) assert.ok(Object.keys(parsed.registry.providers).length > 0)
 })

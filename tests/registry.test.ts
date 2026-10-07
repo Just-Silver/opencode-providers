@@ -2,12 +2,20 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import { test } from "node:test"
 
+import { buildRegistry, parseManifest } from "../plugin/opencode-providers/registry/aggregate.ts"
 import { buildProviderModels } from "../plugin/opencode-providers/registry/models.ts"
 import { parseRegistry } from "../plugin/opencode-providers/registry/schema.ts"
 
-const shipped = JSON.parse(readFileSync(new URL("../registry/registry.json", import.meta.url), "utf8"))
+const root = new URL("../registry/", import.meta.url)
+const read = (rel: string): unknown => JSON.parse(readFileSync(new URL(rel, root), "utf8"))
 
-test("随仓 registry/registry.json 通过 schema 校验", () => {
+const manifest = parseManifest(read("index.json"))
+if (!manifest.ok) throw new Error(manifest.errors.join("\n"))
+const built = await buildRegistry(manifest.manifest, async (rel) => read(rel))
+if (!built.ok) throw new Error(built.errors.join("\n"))
+const shipped = built.registry
+
+test("随仓分文件聚合后通过 schema 校验", () => {
   const result = parseRegistry(shipped)
   assert.equal(result.ok, true, result.ok ? "" : result.errors.join("\n"))
 })

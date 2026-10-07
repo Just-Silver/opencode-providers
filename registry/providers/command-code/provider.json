@@ -1,0 +1,6 @@
+{
+  "name": "Command Code",
+  "package": "@opencode/ai/providers/openai-compatible",
+  "baseURL": "https://api.commandcode.ai/provider/v1",
+  "keyLabel": "Paste Command Code API key"
+}

@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "revision": "sha256:placeholder",
+  "providers": ["command-code", "r4-coder"]
+}

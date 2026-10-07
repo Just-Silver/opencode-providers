@@ -1,0 +1,6 @@
+{
+  "deepseek-v4.1-flash": {
+    "base": "deepseek/deepseek-v4.1-flash",
+    "modelID": "deepseek/deepseek-v4.1-flash"
+  }
+}
