@@ -312,7 +312,7 @@ node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(pr
 本机实测（2026-10-07，**清理后**）只剩当前生效的那一条：
 
 ```
-registry-cache:https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry/registry.json | 2026-10-06T23:40:55.419Z | W/"8638..."
+registry-cache:https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry/index.json | 2026-10-06T23:40:55.419Z | W/"8638..."
 ```
 
 曾存在、已清掉的两条死行（`DELETE FROM kv WHERE key = ?`，`changes=1` 各一条）：
@@ -380,14 +380,14 @@ OAuth 在 `resolve` 时若距 `expires` 不足 5 分钟会自动 refresh（`:696
 | 内容 | 键 | 值 | 谁写 |
 |---|---|---|---|
 | models.dev 目录（内核） | `models-dev:catalog`（自定义源为 `models-dev:catalog:<fast hash>`） | `{updatedAt, digest, body}` | core 的 models-dev 服务 |
-| 本插件注册表 | `plugin:<id 的 hex>:registry-cache:<url>` | `{etag, fetchedAt, body}` | 插件（经 `ctx.storage`，前缀由宿主加） |
+| 本插件注册表 | `plugin:<id 的 hex>:registry-cache:<manifest url>` | `{etag, revision, fetchedAt, body}`（`body` 是**聚合后**的 `{schemaVersion, models, providers}`） | 插件（经 `ctx.storage`，前缀由宿主加） |
 
 两者跨 location 共享、互不冲突（键空间不同）；本插件那一份的 TTL/重拉语义见上一节。
 
 ## 设计定案（0.1.0 起已实现）
 
-- 注册表：GitHub raw 托管（`registry/registry.json` + `registry.schema.json`），仿 models.dev **源头**结构
-  （共享 `models` 表 + provider `base` 引用/覆盖），多家供应商共享。
+- 注册表：GitHub raw 托管（`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`），仿 models.dev **源头**结构
+  （共享模型 `base` 引用/覆盖），多家供应商共享；插件运行期拉 manifest、按 `revision` 决定是否重拉子文件并聚合成一份。
 - 参数：全部自维护（不推断）；**不调**供应商 `/v1/models`。
 - 注册/激活：注册表里每家都注册 + `activation: "auto"` + integration 只声明 `key`（决策依据见下）。
 
@@ -407,7 +407,7 @@ OAuth 在 `resolve` 时若距 `expires` 不足 5 分钟会自动 refresh（`:696
 **独立仓库、插件 + 注册表同仓**（当时候选 C1；本仓库实际形态）：
 
 - 源码在 `plugin/opencode-providers/`（**不放** `.opencode/plugins/`，否则仓库自身成为发现根、与全局安装同 id 相撞）；
-- 注册表在 `registry/registry.json`（+ `registry.schema.json`），GitHub raw 直供；
+- 注册表在 `registry/`（分文件：`index.json` manifest + `providers/**` + `models/**`），GitHub raw 直供；
 - 根 `package.json` 是 npm 包形态（`exports{./server,./tui}`），既能 `"plugins": ["@justsilver/opencode-providers"]` 配置安装，
   也能用 `install.sh` / `install.ps1` 脚本安装；
 - 目录内双入口：`index.ts`（server，拉注册表并注册）+ `tui.ts`（只注册 `/connect-providers`，不读注册表）。
@@ -493,9 +493,12 @@ opencode api delete /api/credential/<cred_id>   # 用完清理
 
 当真实注册表的 id 与配置撞名、不好判定时，用**临时探针注册表**把链路钉一遍（不动用户配置、不动数据库）：
 
-1. 本地起一个只回一份 JSON 的 HTTP 服务（`registry.json` 里放一个不会撞名的 `probe-check` provider）；
-2. 只改**已安装副本**的 `registry/source.ts` 里的 `DEFAULT_REGISTRY_URL` → `http://127.0.0.1:<port>/registry.json`
-   （缓存键含 URL，所以等价于强制重新拉取，不必等 6h TTL）；
+1. 本地起一个 HTTP 服务，按**分文件形态**回：`/index.json`（manifest，`providers:["probe-check"]`）+ `/providers/probe-check/provider.json`
+   + `/providers/probe-check/models.json`（放一个不会撞名的 `probe-check` provider）；
+2. 优先用**配置 options**（不改源码）：把已安装副本的配置写成
+   `"plugins": [{ "package": "@justsilver/opencode-providers", "options": { "registryUrl": "http://127.0.0.1:<port>/index.json" } }]`；
+   或者只改已安装副本 `registry/source.ts` 的 `DEFAULT_REGISTRY_URL` → `http://127.0.0.1:<port>/index.json`
+   （缓存键含 URL，所以等价于强制重新拉取，不必等 6h TTL；`/connect-providers` 里按 `mod+r` 也能强制）；
 3. 等文件监视热重载，然后断言：
    - `/api/integration` 里出现 `probe-check`，且 `metadata.source`、`keyLabel`、`methods` 的 key 标签**都是注册表里的值**；
    - 无凭据时该 provider 在 `/api/model` 里 **0 条**（`activation: auto` 生效）；
@@ -506,7 +509,7 @@ opencode api delete /api/credential/<cred_id>   # 用完清理
 5. **删掉探针留下的缓存行**（否则 `kv` 里永久多一条死行，见上一节的教训）：
 
    ```bash
-   node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.env.USERPROFILE+'\\.local\\share\\opencode\\opencode.db');const ns='plugin:'+[...'opencode-providers'].map(c=>c.charCodeAt(0).toString(16).padStart(4,'0')).join('')+':';console.log(db.prepare('DELETE FROM kv WHERE key = ?').run(ns+'registry-cache:http://127.0.0.1:45999/registry.json'))"
+   node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.env.USERPROFILE+'\\.local\\share\\opencode\\opencode.db');const ns='plugin:'+[...'opencode-providers'].map(c=>c.charCodeAt(0).toString(16).padStart(4,'0')).join('')+':';console.log(db.prepare('DELETE FROM kv WHERE key = ?').run(ns+'registry-cache:http://127.0.0.1:45999/index.json'))"
    ```
 
 实测输出（2026-10-07）：

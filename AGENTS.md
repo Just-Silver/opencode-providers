@@ -1,7 +1,7 @@
 # 项目定位
 
 `opencode-providers`：给 opencode 补上 **models.dev 目录里没有的供应商**。
-一份自维护注册表（`registry/registry.json`，GitHub raw 托管）+ 一个 opencode 插件，实现**零 `opencode.json`** 接入。
+一份自维护注册表（**按供应商分文件**：`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`，GitHub raw 托管；插件运行期拉取并聚合成一份）+ 一个 opencode 插件，实现**零 `opencode.json`** 接入。
 
 现状：`0.1.0` 是**正式版**（npm `latest`，OIDC 发布 + provenance）；预发布在 `next`。
 
@@ -134,9 +134,16 @@
 
 # 技能（`.opencode/skills/`）
 
-- `opencode-providers-registry` —— 维护 `registry/registry.json`：两条路由（新增供应商 / 给已有供应商加模型）、
+- `opencode-providers-registry` —— 维护分文件注册表（`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`）：两条路由（新增供应商 / 给已有供应商加模型）、
   **最小字段铁律**（不写 `keyLabel`/`cost`/`tools`/`env`/`apiKey`…）、协议 → package（`/v1/chat/completions` /
   `/v1/responses` / `/v1/messages` 三种形态）、**一次性用 `question` 收集信息**、改完必须 push + 触发重载 + 验证。
+  **agent 禁止直接读整份注册表**（会随供应商/模型增长而变大）：查/改全走随技能 CLI
+  `.opencode/skills/opencode-providers-registry/scripts/registry.mjs`
+  （`list` / `search` / `show` / `validate` / `sync` / `add-provider` / `add-model` / `add-shared-model`），写命令落盘前先组装 +
+  过 `parseRegistry` 校验，冲突（重复供应商 id / 重复模型 key / 占用 baseURL）直接报错、不写文件；路由 A/B 的 `question` 模板在 SKILL.md 里**原样照搬**。
+  `revision` = `providers/**` + `models/**` 全部文件按 posix 相对路径排序后的确定性哈希；写命令自动重算并重写 `index.json`，手改子文件后用 `sync` 补齐。
+  由 `tests/registry-cli.test.ts` 钉住（分文件读写 / `sync` / 冲突 / Windows 非法路径段）。
+  脚本用 Node（`.mjs`）而非 PowerShell：CI 在 ubuntu 跑 `node --test`，且校验逻辑是 TS（复用 `registry/schema.ts`，单一事实源）。
 - `.opencode/skills/` **不是**插件发现根（发现器只扫 `<config>/plugin`、`<config>/plugins`），放在这里安全。
 - 改这个技能要先做**基线对比测试**（无技能跑一遍看偏差 → 写/改技能 → 有技能再跑一遍），
   已实测的偏差是「自行加 `keyLabel`、把参数硬抽到顶层 `models` + `base`」。

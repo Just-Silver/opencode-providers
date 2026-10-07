@@ -9,11 +9,20 @@
 
 ### Added
 
+- `/connect-providers` 弹窗新增**强制刷新**：footer 动作 + 快捷键 `mod+r`（macOS `Cmd+R`，Windows/Linux `Ctrl+R`），
+  经 server RPC（纯 JSON Schema）绕过 6h TTL 重拉注册表并 `provider`/`integration` `reload()`；上游不可达时保留原有列表并报错
 - `tests/setup.test.ts` 新用例：钉住 `ctx.options.registryUrl` —— 配置里把 `plugins` 写成对象条目传 `options` 即可换注册表地址，
   不用改源码（`schema/src/config/plugin.ts` 证明 config 条目支持 `options`）
 
 ### Changed
 
+- **破坏性变更：注册表改为按供应商分文件 + 插件运行期聚合。** 源 = `registry/index.json`（manifest：`schemaVersion`/`revision`/`providers`）
+  + `registry/providers/<id>/{provider,models}.json` + 顶层共享模型 `registry/models/<lab>/<model>.json`；插件拉 manifest、按 `revision`
+  决定是否重拉子文件，聚合成旧的 `{schemaVersion, models, providers}` 后写 kv（TTL / `ETag` / 失败沿用缓存语义不变）。
+  插件默认地址改为 `.../registry/index.json`；旧的单文件 `registry/registry.json` 与 `registry/registry.schema.json` 已删除。
+  - **旧版本（≤ 0.1.0）拉旧地址会 404** → 沿用本地缓存（列表不清空，但不再更新），需升级到本版才能继续拿到更新。
+- 维护脚本（`.opencode/skills/.../scripts/registry.mjs`）改写为操作分文件：新增 `sync`（重算 `revision` + 重写 `index.json`）、
+  `--root <注册表目录>`（原 `--registry`），`add-shared-model` 改 `--lab` + `--key`；`base`/`lab`/`key`/`id` 逐段校验（拒 Windows 非法字符）
 - 清理死代码：去掉 `INTEGRATION_SOURCE` / `DEFAULT_TIMEOUT_MS` 的多余 `export`；删除 `/connect-providers` 里
   不可达的 OAuth「Sign in required」分支（注册表只声明 `key`，pending 连接不可能出现）
 - 文档按源码复核：注册表缓存的**位置/TTL/重拉条件**（全局 `kv` 表、键含 URL、无后台定时器）、
