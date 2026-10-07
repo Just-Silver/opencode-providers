@@ -2,9 +2,9 @@ name: Release
 
 # 发版策略：**预发布优先** —— 默认只发测试版到 npm 的 `next`，正式版必须手动确认才发 `latest`。
 #
-#   预发布（version 形如 0.1.0-beta.0）：push tag `v0.1.0-beta.0`，或手动 Run workflow 勾 publish
-#   正式版  （version 形如 0.1.0）      ：只能手动 Run workflow 勾 publish + stable
-#                                        —— 直接 push 一个正式 tag 会被这一步拦下
+#   预发布（version 形如 0.1.0-beta.0）：push tag `v0.1.0-beta.0` → 发到 npm 的 `next`
+#   正式版  （version 形如 0.1.0）      ：push tag `v1.2.3` → 发到 npm 的 `latest`
+#                                        （也可用 Actions → Release → Run workflow 勾 publish [+ stable]）
 #
 # 前置：npm 包必须已存在（首次发布人工 `npm publish` 一次），并已登记 Trusted Publisher（OIDC，无需长期 token）。
 on:
@@ -89,8 +89,13 @@ jobs:
             *)   tag=latest ;;
           esac
 
-          if [ "$tag" = "latest" ] && [ "${INPUT_STABLE:-false}" != "true" ]; then
-            echo "::error::${name}@${version} 是正式版：本流水线不允许直接 push 正式 tag 发布；请到 Actions → Release → Run workflow 勾选 publish + stable（它会发布到 latest 并建 tag/Release）"
+          # push tag 本身就是明确的发布意图 → 正式 tag 直接发 latest。
+          # 只有 workflow_dispatch 的入口才需要显式勾 stable 才允许发 latest（不勾 = 预检打包）。
+          stable="${INPUT_STABLE:-false}"
+          if [ "$EVENT" = "push" ]; then stable=true; fi
+
+          if [ "$tag" = "latest" ] && [ "$stable" != "true" ]; then
+            echo "::error::${name}@${version} 是正式版：手动运行时请勾选 publish + stable（publish 才发布，stable 才允许发到 latest）"
             exit 1
           fi
 
