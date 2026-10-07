@@ -1,5 +1,8 @@
 {
   "schemaVersion": 1,
-  "revision": "sha256:placeholder",
-  "providers": ["command-code", "r4-coder"]
+  "revision": "sha256:e7866648b08b52b1b90045996f3a59476465618c1cc9ab8bb0e1a2a8470433f8",
+  "providers": [
+    "command-code",
+    "r4-coder"
+  ]
 }
