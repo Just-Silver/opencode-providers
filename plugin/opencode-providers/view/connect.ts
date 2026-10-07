@@ -14,6 +14,8 @@
 import type { IntegrationInfo } from "@opencode/client"
 import type { Plugin } from "@opencode/plugin/tui"
 
+import { registryRpc } from "../rpc.ts"
+
 type Context = Plugin.Context
 type Connection = IntegrationInfo["connections"][number]
 
@@ -24,11 +26,18 @@ export async function connectProviders(ctx: Context): Promise<void> {
   const integrations = ownIntegrations(ctx).toSorted((a, b) => a.name.localeCompare(b.name))
 
   if (integrations.length === 0) {
-    await ctx.ui.dialog.alert({
+    // Nothing to connect yet — offer the refresh here rather than making the user
+    // restart the service and wait out the 6h TTL.
+    const confirmed = await ctx.ui.dialog.confirm({
       title: "Connect providers",
       message:
-        "No providers from the registry are available. Check that the registry loaded (server log) and restart the service.",
+        "No providers from the registry are available. Force a refresh to re-fetch the registry, then run /connect-providers again.",
+      label: { confirm: "Force refresh" },
     })
+    if (confirmed) {
+      await forceRefresh(ctx)
+      ctx.ui.toast.show({ variant: "info", message: "Reloaded. Run /connect-providers again to connect a provider." })
+    }
     return
   }
 
@@ -39,6 +48,14 @@ export async function connectProviders(ctx: Context): Promise<void> {
       value: integration.id,
       footer: footer(integration),
     })),
+    actions: [
+      {
+        title: "Force refresh",
+        bind: "mod+r",
+        selection: "none",
+        onTrigger: () => void forceRefresh(ctx),
+      },
+    ],
   })
   if (selected === undefined) return
 
@@ -46,6 +63,29 @@ export async function connectProviders(ctx: Context): Promise<void> {
   if (integration === undefined) return
 
   await openProvider(ctx, integration)
+}
+
+/**
+ * Re-fetch the registry through the server RPC (bypasses the TTL) and refresh the
+ * provider list. A failure only surfaces as an error toast: the previously
+ * registered providers stay usable, so nothing is invalidated.
+ */
+export async function forceRefresh(ctx: Context): Promise<void> {
+  try {
+    const result = await ctx.client.rpc(registryRpc).refresh({})
+    if (!result.ok) {
+      const detail = (result.errors ?? ["unknown error"]).join("; ")
+      ctx.ui.toast.show({ variant: "error", message: `Registry refresh failed: ${detail}` })
+      return
+    }
+    ctx.data.location.integration.invalidate(ctx.location)
+    ctx.ui.toast.show({
+      variant: "success",
+      message: `Registry refreshed: ${result.providers ?? 0} providers, ${result.models ?? 0} models`,
+    })
+  } catch (error) {
+    ctx.ui.toast.show({ variant: "error", message: message(error) })
+  }
 }
 
 async function openProvider(ctx: Context, integration: IntegrationInfo): Promise<void> {
