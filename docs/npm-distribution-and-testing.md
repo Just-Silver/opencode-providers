@@ -161,4 +161,18 @@ git commit -am "chore(release): v0.1.0-beta.1" && git tag v0.1.0-beta.1 && git p
 gh workflow run release.yml -f publish=true
 ```
 
-正式版：手动 Run workflow 且勾 `publish` + `stable`（push 一个正式 tag 会被流水线拦下）。
+**正式版**：只能手动 —— `gh workflow run release.yml -f publish=true -f stable=true`（或 Actions → Release → Run workflow 勾两个框）。
+该次运行会：`npm publish --tag latest` → **补建 tag `v<version>`**（`GITHUB_TOKEN` 推送，不递归触发）→ 建/更新 GitHub Release。
+**不要**直接 push 正式 tag：那会被流水线拦下（这是防止误发正式版的闸门）。
+
+### 已实测的发布记录（本仓）
+
+| 版本 | 方式 | 结果 |
+|---|---|---|
+| `0.1.0-beta.0` | 人工（浏览器 2FA） | 首发建包；`latest` 被 npm 自动打上（首个版本） |
+| `0.1.0-beta.1` / `beta.2` | push tag → CD | OIDC 自动发布到 `next`，provenance 已签名；`latest` **未被动** |
+| `0.1.0`（正式版） | 手动 dispatch（`publish`+`stable`） | 发到 `latest` + 补建 tag `v0.1.0` + 建 GitHub Release；provenance 已签名 |
+
+> 本地/使用方切换版本：把 `plugins` 里的 spec 改成 `@justsilver/opencode-providers`（跟随 `latest`）或钉 `@x.y.z`；
+> 实测改完 spec 会被配置监视发现并自动装新代（`~/.cache/opencode/npm/@justsilver/opencode-providers@latest/<gen>`），
+> `/api/plugin` 的 `source.version` 立即变为新版本。

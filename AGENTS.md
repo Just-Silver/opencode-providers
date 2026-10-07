@@ -55,7 +55,10 @@
 - **预发布优先**：先发 `0.1.0-beta.x` 到 npm 的 **`next`**（`publishConfig.tag = next`），验证后再发正式版
 - 流程：整理 `CHANGELOG.md` 的 `[Unreleased]` 成 `## [x.y.z(-beta.n)] - YYYY-MM-DD` → `npm version`（只改 `package.json`）
   → commit → 预发布 push tag `vX.Y.Z-beta.n`（或手动 Run workflow 勾 `publish`）
-- **正式版绝不直接发**：`release.yml` 里 push 一个正式 tag 会被拦下；正式版只能手动 Run workflow 且勾 `publish` + `stable`
+- **正式版绝不直接发**：push 一个正式 tag 会被 `release.yml` 拦下（报错并让它改走手动）；
+  正式版只能 **Actions → Release → Run workflow 勾 `publish` + `stable`**，该次运行会：
+  发布到 `latest` → 补建 tag `v<version>`（tag 由 `GITHUB_TOKEN` 推送，**不会**递归触发工作流）→ 建/更新 GitHub Release。
+  预发布走 tag `vX.Y.Z-beta.n`：自动发 `next` + 建 Release，不碰 `latest`
 - 认证走 **npm Trusted Publishing（OIDC，`id-token: write`，无长期 token）**；但**包必须已存在**，
   所以 `0.1.0-beta.0` 需要**人工首发一次**，之后才交给 CD。npm 侧的 Workflow filename 必须与 `release.yml` 同名
 - 预检用 `npm pack --dry-run`，**别用 `npm publish --dry-run`**（后者会因「版本已存在」而报错，哪怕只是想预检）
