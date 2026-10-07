@@ -357,13 +357,39 @@ OAuth 在 `resolve` 时若距 `expires` 不足 5 分钟会自动 refresh（`:696
 
 → 插件的唯一义务：**保证 `provider.integrationID === integration.id`**（否则 `:366` 找不到凭据）。
 
-## 待定：多 provider 共享注册表（设计进行中）
+## 模型列表怎么进 `/model`（缓存 → 注册 → 过滤 → 暴露）
 
-- 注册表：GitHub raw 托管，仿 models.dev **源头**结构（共享 `models` 表 + provider `base` 引用 + 覆盖），多家供应商共享。
-- 参数：全部自维护（不推断）；`/v1/models` 只用作模型 **id 清单**。
-- 未决：插件如何决定注册/激活哪些 provider（见下）。
+四层，前两层是本插件的，后两层是内核的：
 
-### 激活语义（官方依据 `packages/core/src/provider.ts:392-405`）
+| 层 | 谁做 | 干什么 | 出处 |
+|---|---|---|---|
+| ① 缓存 | 插件（`setup()` 时） | 注册表 JSON 原文存进**全局 `kv` 表**；键 `plugin:<插件 id 每字符 utf-16 hex>:registry-cache:<url>`，值 `{etag, fetchedAt, body}` | `registry/source.ts`、`plugin/host.ts:602-628`（前缀由宿主加） |
+| ② 注册 | 插件（`setup()` 时） | 解析 body → `buildProviderModels()` → `ctx.provider.transform(editor => editor.add({ info, models }))`，**一次性写进 `Provider.Service` 的内存 records**（provider + 它的 models map） | `plugin/opencode-providers/index.ts:106-124` → `plugin/host.ts:202-226` |
+| ③ 过滤 | 内核 | `Provider.snapshot()`：`activation:"disabled"` 剔除；`"enabled"` 直接进；**`"auto"` 要求该 integration 有 connection（凭据）** | `core/src/provider.ts:388-406` |
+| ④ 暴露 | 内核 | `Model.read()`：`all` → `available = all.filter(m => m.enabled)`；`/api/model` 就是 `models.available()` | `core/src/model.ts:218-221,259`、`server/src/handlers/model.ts:10-16` |
+
+- **TUI / 网页的模型选择器读同一个接口**：`component/dialog-model.tsx:25` → `data.location.model.list()` → 客户端 API `model.list` → `/api/model`。
+- `enabled` 来自注册表的 `disabled` 字段（本仓 `registry/models.ts:77`）——所以注册表能"登记但不出现在 `/model`"。
+- **变更通知**：Provider 变更 → `Provider.Event.Updated` → 重算 → `Model.Event.Updated`（`core/src/model.ts:236-251`）→ 客户端刷新。粘上 key 后模型"立刻"出现的两条原因：③ 每次快照都重算 + ④ 的事件推送。
+- **注意**：模型列表是 ② 那一份**内存快照**，**不是**每次读 `kv`。kv 只是 ① 的缓存：注册表内容改了要等 TTL/重载（见「本插件的注册表缓存」节）才重新注册；而**凭据变化是立即生效**（③ 每次快照重算 availability）。
+
+**和内核 models.dev 是同一张表吗**：是同一个 `kv` 表（同一个 `opencode.db`），只是键与值形态不同 ——
+
+| 内容 | 键 | 值 | 谁写 |
+|---|---|---|---|
+| models.dev 目录（内核） | `models-dev:catalog`（自定义源为 `models-dev:catalog:<fast hash>`） | `{updatedAt, digest, body}` | core 的 models-dev 服务 |
+| 本插件注册表 | `plugin:<id 的 hex>:registry-cache:<url>` | `{etag, fetchedAt, body}` | 插件（经 `ctx.storage`，前缀由宿主加） |
+
+两者跨 location 共享、互不冲突（键空间不同）；本插件那一份的 TTL/重拉语义见上一节。
+
+## 设计定案（0.1.0 起已实现）
+
+- 注册表：GitHub raw 托管（`registry/registry.json` + `registry.schema.json`），仿 models.dev **源头**结构
+  （共享 `models` 表 + provider `base` 引用/覆盖），多家供应商共享。
+- 参数：全部自维护（不推断）；**不调**供应商 `/v1/models`。
+- 注册/激活：注册表里每家都注册 + `activation: "auto"` + integration 只声明 `key`（决策依据见下）。
+
+### 激活语义（官方依据 `packages/core/src/provider.ts:393-406`）
 
 | provider.activation | 可用条件 |
 |---|---|
@@ -374,23 +400,23 @@ OAuth 在 `resolve` 时若距 `expires` 不足 5 分钟会自动 refresh（`:696
 → 多 provider 注册表天然应对：全部注册 + `activation: "auto"` + `integration(key)`（只想走 /connect + DB 就**不要**加 env 方法），
 `/connect` 里能看到全部，`/models` 只出现「用户真配了凭据」的那些。
 
-### 插件放哪（待选）
+### 落地形态（已定案）
 
-注册表插件**只需要 server 入口**（目录里 `index.ts`，或 `plugins/` 下直接一个 `.ts` 文件即可，不需要 `tui.tsx`）。
+**独立仓库、插件 + 注册表同仓**（当时候选 C1；本仓库实际形态）：
 
-| 选项 | 形态 | 代价 |
-|---|---|---|
-| A | 加进现有 `opencode-tui-usage/` 目录（加 `index.ts`） | 复用现有安装/发版/一键更新；但一个插件混两个职责，用户为装注册表也得装用量侧边栏 |
-| B | 独立仓库 | 职责单一；要重建安装/发版/更新 |
-| C1 | **新仓库**同时放注册表 JSON + 插件代码 | 注册表本就要 GitHub raw；同版本演进；不污染现有插件；新仓库需自建 release/安装 |
-| C2 | 当前仓库新建插件目录 + 注册表文件 | 省一个仓库；但当前仓库定位是「单 TUI 插件仓库」，会变多插件仓库，install/update/发版都要改 |
+- 源码在 `plugin/opencode-providers/`（**不放** `.opencode/plugins/`，否则仓库自身成为发现根、与全局安装同 id 相撞）；
+- 注册表在 `registry/registry.json`（+ `registry.schema.json`），GitHub raw 直供；
+- 根 `package.json` 是 npm 包形态（`exports{./server,./tui}`），既能 `"plugins": ["@justsilver/opencode-providers"]` 配置安装，
+  也能用 `install.sh` / `install.ps1` 脚本安装；
+- 目录内双入口：`index.ts`（server，拉注册表并注册）+ `tui.ts`（只注册 `/connect-providers`，不读注册表）。
 
 ## 坑 / 注意
 
 - `integrationID` 必须与 provider 的 `integrationID` 一致，否则凭据不会注入（`model-resolver.ts:366`）。
 - provider 默认 `activation: "auto"`：无连接时不可见；想先选模型后连凭据就设 `"enabled"`。
 - `package` 用 V2 原生 `@opencode/ai/providers/*`，别用 `aisdk:`/`@ai-sdk/*`（旧写法，会被 rewrite）。
-- 模型清单来源要稳定：供应商 `/v1/models` 字段各家不同，可能要映射成 `Model.Info`（参考 `packages/core/src/modal/models.ts:96-151` 的 `build()` 合并写法）。
+- 模型清单来源要稳定：本插件**不调**供应商 `/v1/models`，一律以自维护注册表为准（参数全写全）；
+  要"登记但不出现"就用 `disabled`，`enabled` 字段由此映射（`registry/models.ts:77`）。
 - server 插件在**后台服务进程**里跑；改完插件**通常会被文件监视热重载**（实测：覆盖 `index.ts` 后 `/api/plugin` 立即可见 `status=active`，无需重启），必要时才 `opencode service restart`。
 - 若供应商在 models.dev 目录里，其实连 provider/models 都不用注册，只需注册一个带 key 的 integration。
 
