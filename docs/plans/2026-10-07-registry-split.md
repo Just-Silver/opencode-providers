@@ -155,6 +155,8 @@ test("随仓分文件聚合后过 schema，两家参数原样", async () => {
 })
 ```
 
+> **约束（评审 B）**：新版必须**逐条保留**旧 `tests/registry.test.ts` 的三条用例——① `parseRegistry.ok`；② `command-code`/`r4-coder` 的 `baseURL` 与 `keyLabel` 断言；③ `buildProviderModels` 的 `id`/`name`/`limit`/`variants=["low","high","max"]`/`reasoningEffort="max"`/`capabilities.tools` 与两家 `modelID` 断言。只把「读单文件」换成「读 `index.json` → `buildRegistry` → `parseRegistry`」，断言值一字不改。
+
 - [ ] **Step 3: 改 `tests/schema.test.ts`** —— 删除末条 `"shipped registry.json parses"`（`schema.test.ts:118-123`），把它换成分文件版（读 `index.json` → `buildRegistry` → `parseRegistry.ok`）。`parseRegistry` 的其它单测保持不变。
 - [ ] **Step 4: 跑测试** — Run: `node --test tests/registry.test.ts tests/schema.test.ts tests/aggregate.test.ts` — Expected: PASS。
 - [ ] **Step 5: 提交**
@@ -188,7 +190,7 @@ git commit -m "refactor(registry): 迁移为按供应商分文件 + manifest，�
 - 规则：304 → 若 `parseBody(cached.body).ok` 则只刷 `fetchedAt`；否则**发一次无条件 GET** 取回 manifest body 再走重建（RF2）。`revision` 短路：`cached.revision === manifest.revision && parseBody(cached.body).ok` → 只刷 `fetchedAt`（`source:"cache"`）。写缓存带 `revision`。
 
 - [ ] **Step 1: 写失败测试** `tests/source.test.ts`（假 fetch 按 URL 返回 manifest/子文件；`filesFetch(map)` 记录 `calls`）
-  - ① 新鲜缓存不打网络；② `force` 绕过 TTL；③ manifest 带 `If-None-Match`，304 + 合法缓存 → 保留旧 body、只刷 `fetchedAt`、`calls.length===1`；④ revision 未变 → 不重拉子文件（`calls.length===1`）；⑤ revision 变化 → 重拉并写缓存（body 含新家）；⑥ 网络失败回退 stale；⑦ **304 且缓存 body 损坏 → 无条件 GET 后重建**（RF2，断言第二次 GET 无 `if-none-match`）；⑧ 某家子文件 404 → 跳过该家、其余注册成功且 `warnings` 非空（RF3）。
+  - ① 新鲜缓存不打网络；② `force` 绕过 TTL；③ manifest 带 `If-None-Match`，304 + 合法缓存 → 保留旧 body、只刷 `fetchedAt`、`calls.length===1`；④ revision 未变 → 不重拉子文件（`calls.length===1`）；⑤ revision 变化 → 重拉并写缓存（body 含新家）；⑥ 网络失败回退 stale；⑦ **304 且缓存 body 损坏 → 无条件 GET 后重建**（RF2，断言第二次 GET 无 `if-none-match`）；⑧ 某家子文件 404 → 跳过该家、其余注册成功且 `warnings` 非空（RF3）；⑨ **200 且 revision 未变、但缓存 body 损坏 → 重建**（RF2 另一路，断言重拉子文件并写回合法 body）；⑩ 写缓存后读回的 `revision` == manifest.revision（评审 14，`asCacheEntry` 整对象透传须保留该字段）。
 - [ ] **Step 2: 跑测试确认失败** — Run: `node --test tests/source.test.ts` — Expected: FAIL。
 - [ ] **Step 3: 实现 `source.ts`**（读流见 spec §6；`readJson` 用 `new URL(rel, url)` + `AbortSignal.timeout`）。
 - [ ] **Step 4: 跑测试确认通过** — Run: `node --test tests/source.test.ts` — Expected: PASS。
@@ -230,6 +232,7 @@ git commit -m "feat(registry): source 改 manifest 取数 + revision 短路 + fo
 - [ ] **Step 1: 改/写测试** `tests/setup.test.ts`
   - `withFetch` 改为「按树返回」（manifest + 分文件）；原有两条注册断言（keyLabel/activation/baseURL/modelID/limit/variants）保持不变。
   - 用**闭包内 state**：连续两次 `setup`（现有「缓存按 URL 隔离」用例）不得互相污染。
+  - **改 fetch 计数断言（评审 A）**：分文件取数下首次 `setup` = 1 manifest + 2×(`provider.json`+`models.json`) + 1 共享子文件 = **6 次**（原 `assert.equal(calls, 1)` 必改）；第二次 `setup`（有新鲜缓存）= **+0**。
   - 新增：假 `rpc.register` 捕获 handlers，调用 `refresh()`（manifest revision 未变）→ 返回 `{ ok:true, providers:2 }` 且 `integration.reload`/`provider.reload` 各被调 1 次。
   - 新增（RF4）：refresh 时 fetch 全 404（有缓存）→ 返回 `{ ok:false, errors:[…] }`，`state.providers` 仍为旧的 2 条、**未**调用 reload。
 - [ ] **Step 2: 跑测试确认失败** — Run: `node --test tests/setup.test.ts` — Expected: FAIL。
@@ -293,6 +296,16 @@ test("非空态：dialog.select 收到 'Force refresh' + mod+r 的 action", asyn
   const action = captured.actions.find((a: any) => a.title === "Force refresh")
   assert.equal(action.bind, "mod+r"); assert.equal(action.selection, "none")
 })
+
+test("空态：confirm 确认后触发 forceRefresh（评审 D）", async () => {
+  const seen: any = { refresh: 0 }
+  const ctx = { location: {},
+    data: { location: { integration: { list: () => [], invalidate: () => {} } } },
+    client: { rpc: () => ({ refresh: async () => { seen.refresh++; return { ok: true, providers: 0, models: 0, source: "network", fetchedAt: 1 } } }) },
+    ui: { dialog: { confirm: async () => true }, toast: { show: () => {} } } } as any
+  await connectProviders(ctx)
+  assert.equal(seen.refresh, 1)
+})
 ```
 - [ ] **Step 2: 跑测试确认失败** — Run: `node --test tests/connect.test.ts` — Expected: FAIL。
 - [ ] **Step 3: 实现**（import `../rpc.ts`；加 `forceRefresh` 与上述 `actions`/空态分支）。
@@ -319,6 +332,7 @@ git commit -m "feat(tui): /connect-providers 加强制刷新（mod+r + 空态入
 - 任何写命令结束后自动 `sync` 语义（重算 + 重写）。
 - `validate` = 聚合过 `parseRegistry` + `index.json` 的 providers 集合 == `providers/*/` 实际目录 + 重算 revision == 存储值。
 - **段校验**：`base`/`--lab`/`--key`/`--id` 一律按 `/` 拆段，**逐段**套 `ID_PATTERN`（`^[A-Za-z0-9][A-Za-z0-9._-]*$`）；任一段非法即报错（RF5）。
+- **保留现有校验（评审 C）**：`--baseurl` 必须是合法 http(s) URL；同一 `baseURL` 已被别家占用时**报错**，加 `--force` 放行（现状见旧 `registry.mjs:415-421`，不得静默丢失）。
 - 源文件格式：`JSON.stringify(x, null, 2) + "\n"`（幂等）。
 
 - [ ] **Step 1: 写失败测试** `tests/registry-cli.test.ts`：建临时 registry 树，`spawnSync` 跑 CLI：
@@ -327,6 +341,7 @@ git commit -m "feat(tui): /connect-providers 加强制刷新（mod+r + 空态入
   - 重复 `add-provider` id / 重复 `add-model` key → 退出码 1 且文件不变。
   - `add-model --base deepseek/deepseek-v4.1-flash` 只写 `base`+`modelID`。
   - `add-shared-model --lab deepseek --key foo` 写 `models/deepseek/foo.json`。
+  - **C**：`add-provider --baseurl <已被占用的 URL>` → 退出码 1；同一命令加 `--force` → 成功。
   - **RF5**：`add-provider --id 'a:b'` → 退出码 1，含「非法」。
   - `sync`：手改子文件后跑 `sync`，`validate` 退出码 0；不跑 `sync` 直接 `validate` → 退出码 1（revision 不一致）。
   - 格式化幂等：`sync` 两次，文件字节不变（替代旧 `formatRegistry` 复刻用例）。
@@ -354,7 +369,7 @@ git commit -m "feat(skill): CLI 改分文件 + sync/段校验，自动维护 ind
 
 - [ ] **Step 1: SKILL.md**：源结构改分文件；CLI 命令加 `sync` 与 `--root`；强制刷新说明；保留「禁止读整份」与 Questions 模板；删除 `formatRegistry` 表述。
 - [ ] **Step 2: AGENTS.md**：改第 4 行、技能段（137-144 行）里 `registry/registry.json` 描述为分文件/manifest/revision；删「`formatRegistry` 逐字节复刻」。
-- [ ] **Step 3: README.md**：改 7-8 行（目录树）、112 行（改法说明）、169 行（schema 说明改为「校验以 CLI `validate` 为准」）；55 行示例 URL 可保留或改指 `index.json`。
+- [ ] **Step 3: README.md**：改 7-8 行（目录树）、112 行（改法说明）、169 行（schema 说明改为「校验以 CLI `validate` 为准」）；55 行示例 URL **改指** `registry/index.json`（与 `DEFAULT_REGISTRY_URL` 一致，评审 E）。
 - [ ] **Step 4: `docs/opencode-plugin-provider-no-config.md`**：更新 315/321（缓存键示例）、389/410（注册表结构）、496-509（探针 URL 说明）。
 - [ ] **Step 5: CHANGELOG.md**：在 `[Unreleased]` 记「破坏性变更：注册表改分文件 + 运行期聚合；插件默认地址改 `registry/index.json`；旧版本（≤0.1.0）拉旧地址 404 → 沿用缓存、不再更新，需升级」。
 - [ ] **Step 6: CI**：`ci.yml` 第 28 行用例名改掉旧路径，并在 `node --test` 后加：
