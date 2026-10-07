@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-07
+
 ### Added
 
 - `/connect-providers` 账号管理支持**重命名**（`ctrl+r`，弹窗预填当前名称）与**删除**（`ctrl+d`，二次确认后删除）；
@@ -134,7 +136,8 @@
 - 插件源码从 `.opencode/plugins/opencode-providers/` 移到 `plugin/opencode-providers/`：仓库自身不再是插件发现根，避免在仓库里跑 opencode 时与全局安装的同 id 副本相撞（`Duplicate plugin ID` → 面板里一条 `failed`）
 - 安装后**通常无需重启**（插件目录被文件监视热重载），不再要求 `opencode service restart`
 
-[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.3.0
 [0.1.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0
 [0.1.0-beta.2]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.1
