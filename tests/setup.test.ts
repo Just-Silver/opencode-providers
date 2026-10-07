@@ -21,7 +21,7 @@ interface FakeContext {
   readonly ctx: any
 }
 
-function fakeContext(): FakeContext {
+function fakeContext(options: Record<string, unknown> = {}): FakeContext {
   const state: FakeContext = {
     integrations: new Map(),
     methods: [],
@@ -31,7 +31,7 @@ function fakeContext(): FakeContext {
   }
   const storage = state.storage
   state.ctx = {
-    options: {},
+    options,
     storage: {
       get: async (key: string) => storage.get(key),
       set: async (key: string, value: unknown) => void storage.set(key, value),
@@ -154,4 +154,25 @@ test("缓存按 URL 隔离：命中缓存时不再打网络", async () => {
   } finally {
     globalThis.fetch = original
   }
+})
+
+// 配置里写成对象形式就能传 options：plugins: [{ package: "…", options: { registryUrl: "…" } }]
+// （opencode 的 config.plugins 条目 schema 支持 options，见 schema/src/config/plugin.ts:6-11）
+test("options.registryUrl 可换注册表地址：拉取它、且缓存键含该 URL", async () => {
+  const state = fakeContext({ registryUrl: "https://registry.example.test/registry.json" })
+  const calls: string[] = []
+  const original = globalThis.fetch
+  globalThis.fetch = (async (url: unknown) => {
+    calls.push(String(url))
+    return new Response(registryBody, { status: 200, headers: { "content-type": "application/json" } })
+  }) as typeof fetch
+  try {
+    await plugin.setup(state.ctx)
+  } finally {
+    globalThis.fetch = original
+  }
+
+  assert.deepEqual(calls, ["https://registry.example.test/registry.json"])
+  assert.deepEqual([...state.storage.keys()], ["registry-cache:https://registry.example.test/registry.json"])
+  assert.deepEqual([...state.integrations.keys()].sort(), ["command-code", "r4-coder"])
 })

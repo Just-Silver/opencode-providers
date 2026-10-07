@@ -8,7 +8,7 @@ registry/registry.json           ← 唯一事实源：供应商 + 模型 + 参�
 registry/registry.schema.json    ← 给编辑器校验 registry.json
 plugin/opencode-providers/       ← 插件源码（安装时整目录复制到 ~/.config/opencode/plugins/）
 ├── index.ts                     ← server 入口：拉注册表 → 注册 integration/provider/models
-├── tui.tsx                      ← TUI 入口：注册 /connect-providers 命令
+├── tui.ts                       ← TUI 入口：注册 /connect-providers 命令（不写 JSX，见下）
 ├── registry/                    ← 纯逻辑：schema 校验 / 元数据映射 / 拉取缓存
 └── view/                        ← /connect-providers 交互
 ```
@@ -34,17 +34,28 @@ OpenCode 的供应商清单来自 models.dev 目录，**目录里没有的供应
 }
 ```
 
+等价的一条命令（帮你写进全局配置）：`opencode plugin add @justsilver/opencode-providers`。
+
 想**试某个测试版**就把版本写全（试完再回到正式版）：
 
 ```jsonc
 {
-  "plugins": ["@justsilver/opencode-providers@0.1.0-beta.0"]
+  "plugins": ["@justsilver/opencode-providers@0.1.0-beta.2"]
 }
 ```
 
 - 预发布版本发布在 npm 的 **`next`** dist-tag 上，正式版才发 `latest`。
 - 升级 / 卸载（`<目标>` 就是配置里那串原样）：`opencode plugin update @justsilver/opencode-providers` / `opencode plugin remove …`。
 - 本插件的 TUI 入口**不含 JSX**、不依赖 Solid，所以配置安装不会踩「双 Solid 运行时」的坑。
+- 想指向**别的注册表**（自建/私有）：配置改成对象条目传 options，不用改源码——
+
+  ```jsonc
+  {
+    "plugins": [
+      { "package": "@justsilver/opencode-providers", "options": { "registryUrl": "https://example.com/registry.json" } }
+    ]
+  }
+  ```
 
 ### 方式 B：安装脚本（零依赖备用路径）
 
@@ -98,7 +109,8 @@ API Key 只在你贴入时经过本插件的内存，不落任何本项目自己
 
 ## 维护注册表
 
-改 `registry/registry.json` 提交后，运行中的 opencode 最迟 6 小时（TTL）自动跟上；想立刻生效就重启服务。
+改 `registry/registry.json` 提交后，**下一次这个插件被加载时**才会跟上：加载时若缓存已超过 6 小时（TTL）就重新拉取。
+插件**没有后台定时器**，所以一个连着跑很久的服务不会自己刷新——想立刻生效就 `opencode service restart`。
 拉取使用 `ETag`，内容没变时不会重复下载；网络失败时继续沿用本地缓存，不会把供应商列表清空。
 
 ### 结构
@@ -174,14 +186,14 @@ node scripts/smoke-api.mjs         # 全跑：插件已加载 / 供应商已注�
 `smoke-api.mjs` 的鉴权自动读 `~/.local/state/opencode/service.json`；它的 `models` 场景会写入并删除一条
 临时凭据（label `smoke-throwaway`），且只对「当前没有任何凭据」的供应商生效。
 
-两个入口的打包/语法检查（两个入口都不 import 外部运行时依赖）：
+两个入口的打包/语法检查（TUI 入口的 `@opencode/plugin/tui` 是运行时注入的，必须标 `--external`）：
 
 ```bash
 npx --yes esbuild plugin/opencode-providers/index.ts --bundle --platform=node --format=esm \
   --outfile=dist/providers-server.js
 
 npx --yes esbuild plugin/opencode-providers/tui.ts --bundle --platform=node --format=esm \
-  --outfile=dist/providers-tui.js
+  --external:@opencode/plugin/tui --outfile=dist/providers-tui.js
 ```
 
 改完插件文件**通常无需重启**：插件目录被文件监视，覆盖后自动热重载。

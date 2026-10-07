@@ -3,6 +3,8 @@
 `opencode-providers`：给 opencode 补上 **models.dev 目录里没有的供应商**。
 一份自维护注册表（`registry/registry.json`，GitHub raw 托管）+ 一个 opencode 插件，实现**零 `opencode.json`** 接入。
 
+现状：`0.1.0` 是**正式版**（npm `latest`，OIDC 发布 + provenance）；预发布在 `next`。
+
 # 语言规则
 
 - 全程中文沟通；`git commit` 用中文。
@@ -18,9 +20,9 @@
   证据：`packages/core/src/plugin/supervisor.ts:96-111`（`failures` 里塞入重复项，`state.status="failed"`）。
 - 同目录**双入口**（`packages/plugin/src/host.ts:43` 的 `server: entry(["server",""])` / `tui: entry(["tui"])`）：
   - `index.ts` = **server 入口**：拉注册表 → 注册 integration / provider / models。**不得触碰 `context.ui`**
-  - `tui.ts` = **TUI 入口**：只注册 `/connect-providers` 命令与交互；图层必须写 **`mode: "global"`**
-  （图层 mode 默认 `"base"`，而提示框 push 的是 `"composer"`／补全时 `"autocomplete"` → 漏了就会"插件 active 但看不到命令"；
-  证据：`packages/tui/src/context/keymap.tsx:209-214` + `component/prompt/autocomplete.tsx:474-483`）
+  - `tui.ts` = **TUI 入口**：只注册 `/connect-providers` 命令与交互（**不读注册表**，命令里读服务端已注册的 integration）；
+    图层必须写 **`mode: "global"`**（图层 mode 默认 `"base"`，而提示框 push 的是 `"composer"`／补全时 `"autocomplete"`
+    → 漏了就会"插件 active 但看不到命令"；证据：`packages/tui/src/context/keymap.tsx:209-214` + `component/prompt/autocomplete.tsx:474-483`）
 - **server 入口不得 import 任何 `@opencode/*`（实测踩坑，opencode 2.0.24）**：脚本安装的本地 server 插件拿不到
   `@opencode/plugin`，会以 `ResolveMessage: Cannot find package '@opencode/plugin'` 加载失败（`/api/plugin` 里 `status: failed`）。
   `@opencode/plugin/tui` **是**注入的，TUI 入口照常 import。运行时需要的都是普通值：
@@ -47,7 +49,14 @@
 - 拉取：默认 6h TTL + `ETag` + 失败沿用旧缓存。缓存落在 `ctx.storage`（= 全局 `opencode.db` 的 `kv` 表，宿主给键加
   `plugin:<id 的 hex>:` 前缀，跨 location 共享）；**键含 URL**（`registry-cache:<url>`），换地址即刻重拉；
   **没有后台定时器** —— 只在插件 `setup()`（= opencode 启动 / 安装换版本 / 配置变更热重载 / 重启）时判定一次 TTL
+  （内核 models.dev 才是"每 5 分钟轮询"，别把两者混了）
 - 参数写全，不许猜：`limit`/`cost`/`tools`/模态/`compatibility`/`variants` 都由注册表给出
+- **注入链路**：`kv` 缓存 → `setup()` 解析 → `editor.add({ info, models })` 写进内核 `Provider.Service` 内存 records
+  → `Provider.snapshot()` 按 activation/凭据过滤 → `Model.available()` → `/api/model`。**内核从不读我们那条 kv 行**，
+  它只是防重复拉取的私有缓存；清掉它只会引起一次重拉，不会改已注册的模型列表
+- **换注册表来源**不用改源码：配置里写成对象条目传 options
+  （`"plugins": [{ "package": "@justsilver/opencode-providers", "options": { "registryUrl": "…" } }]`；
+  插件读 `ctx.options.registryUrl`，有单测钉住。`schema/src/config/plugin.ts:6-11` 证明 config 条目支持 options）
 
 # 发版
 
@@ -65,7 +74,10 @@
   所以 `0.1.0-beta.0` 需要**人工首发一次**，之后才交给 CD。npm 侧的 Workflow filename 必须与 `release.yml` 同名
 - 预检用 `npm pack --dry-run`，**别用 `npm publish --dry-run`**（后者会因「版本已存在」而报错，哪怕只是想预检）
 - `install.sh` / `install.ps1` 取源：最新 Release tag 优先，仓库无 Release 时回退 `main`
-- `.github/workflows/ci.yml` 在 push main / PR 上跑「版本一致性 + `node --test`」
+- `.github/workflows/ci.yml` 在 push main / PR 上跑「版本一致性 + `node --test`」；**没有 lint/typecheck/formatter**，
+  改完必须自己跑单测 + esbuild（下面）
+- 使用方安装/升级（`opencode plugin` 子命令实测存在，`packages/cli/src/commands/commands.ts:269-311`）：
+  `opencode plugin add @justsilver/opencode-providers` / `opencode plugin update <配置里那串原样>` / `opencode plugin remove …`
 - 细节与出处见 `docs/npm-distribution-and-testing.md`
 
 # 运行与验证
@@ -99,11 +111,26 @@
 - **安装脚本已端到端实测**：`pwsh -NoProfile -File .\install.ps1` → 无 Release 时解析 `main` → clone → 原子替换 →
   插件被文件监视热重载为 `status=active`、集成仍在；安装后文件是 **CRLF**（`* text=auto` + 本机 `core.autocrlf=true`），
   **Bun 执行正常**（实测 active），只有 `*.sh` 被 `.gitattributes` 固定为 LF（因为要 `curl … | bash`）
-- 开发时把工作树部署到全局：`pwsh -NoProfile -File .\install.ps1 -Local` / `bash install.sh --local`（含未提交改动）
+- 开发时把工作树部署到全局：`pwsh -NoProfile -File .\install.ps1 -Local` / `bash install.sh --local`（含未提交改动）；
+  **npm 安装与脚本安装同 id 不可并存**（同时存在 = 一条 `failed`），切换时把另一份移出发现根或删掉
 - **注册表 id 与 `opencode.json` 里 `providers.<id>` 撞名时会「各管一半」**：integration 的 `metadata.source`/`keyLabel`/`methods` 用注册表那份，
   但 provider 的 `activation` 与 `settings.apiKey` 仍是配置那份（`enabled` + 明文 env key）⇒ 模型无凭据也可见、`auto` 语义失效。
   要完全走注册表就删掉配置里那一块；只想用 `{env:…}` 就别写进注册表 —— 同 id 两边只留一边
 - 换注册表 URL / 删注册表条目后要**触发一次重载**才生效（改文件、重装、重启）；URL 404 时插件沿用旧缓存，但**新 key 无缓存时 setup 会直接 return**（插件 active 却注册 0 条）
+- 查注册表缓存（只读，最安全；`console.*` 不进 opencode 日志）：
+  ```
+  node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.env.USERPROFILE+'\\.local\\share\\opencode\\opencode.db',{readOnly:true});const ns='plugin:'+[...'opencode-providers'].map(c=>c.charCodeAt(0).toString(16).padStart(4,'0')).join('')+':';for(const r of db.prepare('SELECT key,value FROM kv WHERE key LIKE ?').all(ns+'%')){const v=JSON.parse(r.value);console.log(r.key.slice(ns.length),'|',new Date(v.fetchedAt).toISOString(),'|',v.etag)}"
+  ```
+
+# 收尾纪律（踩过的坑）
+
+- **临时探针必须双向收尾**：探针法（临时注册表 + 改 `DEFAULT_REGISTRY_URL`）除了把源码还原，
+  还要删掉它留下的 `kv` 行（键 `…:registry-cache:<探针 URL>`），否则永久残留一条死行；
+  更干净的做法是用 `options.registryUrl`（见「设计约束」）而不是改源码
+- **临时文件别留在用户机器上**：验证脚本/落盘的 JSON/备份文件用系统临时目录（本机 `%TEMP%\opencode`），
+  收尾时清掉；只保留明确告知过的配置备份
+- **不留死代码**：声明了却没人用的 export/可达不到的钩子都算（本项目无 lint，靠自觉 + 单测）。
+  删钩子前先在 opencode 源码里确认它真的不可达（例：`options.registryUrl` 经 config 对象条目**可达** → 留下并补单测）
 
 # 技能（`.opencode/skills/`）
 
@@ -118,6 +145,7 @@
 
 - `opencode-commands.md` —— 内置命令 vs 插件命令、同名冲突语义、插件注册命令/对话框的可用 API
 - `opencode-connect-custom-provider.md` —— `/connect` 数据来源、凭据存哪/如何注入、目录 TTL、自维护注册表怎么抄 models.dev
-- `opencode-plugin-provider-no-config.md` —— 零 `opencode.json` 的证据链、`activation` 语义、模型参数来源与 TTL 参考
-- `npm-distribution-and-testing.md` —— npm 包形态/预发布发布策略（OIDC、dist-tag）、TUI 不写 JSX 的根因、
-  `scripts/smoke-api.mjs` 冒烟姿势与「怎么判定插件到底加载没加载」（参考 `opencode-goal` 后的结论）
+- `opencode-plugin-provider-no-config.md` —— 零 `opencode.json` 的证据链、`activation` 语义、注册表缓存的
+  位置/TTL/重拉条件、**模型列表怎么进 `/model`（四层链路）**、撞名「各管一半」、探针注册表验证法
+- `npm-distribution-and-testing.md` —— npm 包形态/预发布发布策略（OIDC、dist-tag、正式版手动流程）、TUI 不写 JSX 的根因、
+  `scripts/smoke-api.mjs` 冒烟姿势与「怎么判定插件到底加载没加载」

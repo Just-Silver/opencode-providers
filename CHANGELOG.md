@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+### Added
+
+- `tests/setup.test.ts` 新用例：钉住 `ctx.options.registryUrl` —— 配置里把 `plugins` 写成对象条目传 `options` 即可换注册表地址，
+  不用改源码（`schema/src/config/plugin.ts` 证明 config 条目支持 `options`）
+
+### Changed
+
+- 清理死代码：去掉 `INTEGRATION_SOURCE` / `DEFAULT_TIMEOUT_MS` 的多余 `export`；删除 `/connect-providers` 里
+  不可达的 OAuth「Sign in required」分支（注册表只声明 `key`，pending 连接不可能出现）
+- 文档按源码复核：注册表缓存的**位置/TTL/重拉条件**（全局 `kv` 表、键含 URL、无后台定时器）、
+  **模型列表进 `/model` 的四层链路**、opencode 内核 TTL 对照；README 修正 `tui.ts` 文件名与「最迟 6 小时自动跟上」的错误说法
+
 ## [0.1.0] - 2026-10-07
 
 > 首个**正式版**（由 `0.1.0-beta.0` → `0.1.0-beta.2` 三个预发布版本稳定而来）；npm 的 `latest` 指向它。

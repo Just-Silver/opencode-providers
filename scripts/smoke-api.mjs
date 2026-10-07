@@ -5,7 +5,7 @@
  *   node scripts/smoke-api.mjs --list
  *   node scripts/smoke-api.mjs                                  # 全部场景
  *   node scripts/smoke-api.mjs --scenario plugin,integrations   # 指定场景
- *   node scripts/smoke-api.mjs --integration example            # 指定用哪家供应商做「凭据 → 模型」链路
+ *   node scripts/smoke-api.mjs --integration command-code        # 指定用哪家供应商做「凭据 → 模型」链路
  *
  * 鉴权：优先读 `~/.local/state/opencode/service.json` 的 url/password（`opencode pair` 已不再打印口令），
  * 也可 `--server http://127.0.0.1:PORT --password xxx` 显式指定。

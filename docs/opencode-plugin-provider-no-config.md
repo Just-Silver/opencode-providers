@@ -372,6 +372,8 @@ OAuth 在 `resolve` 时若距 `expires` 不足 5 分钟会自动 refresh（`:696
 - `enabled` 来自注册表的 `disabled` 字段（本仓 `registry/models.ts:77`）——所以注册表能"登记但不出现在 `/model`"。
 - **变更通知**：Provider 变更 → `Provider.Event.Updated` → 重算 → `Model.Event.Updated`（`core/src/model.ts:236-251`）→ 客户端刷新。粘上 key 后模型"立刻"出现的两条原因：③ 每次快照都重算 + ④ 的事件推送。
 - **注意**：模型列表是 ② 那一份**内存快照**，**不是**每次读 `kv`。kv 只是 ① 的缓存：注册表内容改了要等 TTL/重载（见「本插件的注册表缓存」节）才重新注册；而**凭据变化是立即生效**（③ 每次快照重算 availability）。
+- **内核从不读 ① 那条 kv 行**：它是插件私有的持久缓存（键带插件命名空间前缀），只有插件的 server 入口读写；
+  注册到 `/model` 全靠 ② 的 `editor.add({ info, models })` —— 所以"清掉 kv 缓存"只会引起一次重新拉取，**不会**让已注册的模型列表变化。
 
 **和内核 models.dev 是同一张表吗**：是同一个 `kv` 表（同一个 `opencode.db`），只是键与值形态不同 ——
 
