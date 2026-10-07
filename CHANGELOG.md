@@ -7,6 +7,20 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-07
+
+### Fixed
+
+- **`/connect-providers` 强制刷新后列表不更新**：`doRefresh` 刷新成功只调了
+  `ctx.data.location.integration.invalidate()`，而 `invalidate` 仅删除 sync 标记、**不会重新拉取**，`list()`
+  读到的仍是旧的客户端缓存（此时服务端其实已注册新供应商）→ 重开的弹窗还是旧列表。
+  改用与其它操作一致的 `reloadIntegrations()`（`invalidate` + `await sync`），刷新后重开的列表与服务端
+  `/api/integration` 一致。证据：`packages/client/src/solid/data.ts` 的 `locationResource`
+  （`list` 读 store、`sync` 才 `sync.run` 拉取、`invalidate` 只 `sync.invalidate`）
+- **`/connect-providers` 刷新进度模态看不到**：`refreshWithProgress` 用 `void` 打开 `dialog.alert` 后
+  在 `finally` 里立即 `clear()`，刷新一返回就把模态抹掉（快则一帧都看不到）。改为刷新期间不再自行 `clear`：
+  列表路径由重开的列表弹窗顶替模态，空态路径（无后续弹窗）显式 `clear`，模态在整个刷新期间保持可见
+
 ## [0.3.0] - 2026-10-07
 
 ### Added
@@ -136,7 +150,8 @@
 - 插件源码从 `.opencode/plugins/opencode-providers/` 移到 `plugin/opencode-providers/`：仓库自身不再是插件发现根，避免在仓库里跑 opencode 时与全局安装的同 id 副本相撞（`Duplicate plugin ID` → 面板里一条 `failed`）
 - 安装后**通常无需重启**（插件目录被文件监视热重载），不再要求 `opencode service restart`
 
-[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.3.0
 [0.1.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0
 [0.1.0-beta.2]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.2

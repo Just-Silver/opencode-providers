@@ -104,6 +104,32 @@ ctx.keymap.layer(() => ({
 
 → 若本项目要做命令，走 **独立名字**（如 `/providers`）+ `ctx.command.transform`（server 即可），别抢 `connect`。
 
+## 坑：强制刷新后列表不更新 —— `invalidate()` 不重拉，必须 `sync()`
+
+插件读「已注册的 integration」走 `ctx.data.location.integration`（`LocationCollection`：`list` / `sync` / `invalidate`，
+类型见 `packages/plugin/src/tui/context.ts:55-58`）。它背后的实现是 `packages/client/src/solid/data.ts` 的 `locationResource`：
+
+- `list()` → 读 **store 里那份已发布的数据**（**不发请求**）
+- `sync()` → `sync.run(key, load)`：真正发请求并 `setStore` 发布
+- `invalidate()` → 只做 `sync.invalidate(key)`：**删掉「已同步」标记，不触发任何拉取**
+
+所以「刷新完让列表更新」必须 `invalidate()` **之后 `await sync()`**；只 `invalidate()` 的话 `list()` 仍是旧值。
+（服务端 `/api/integration` 可能已经是新的，但 TUI store 不会自己跟，除非有事件触发
+`integration.updated` → `invalidate` + `sync`，见 `data.ts:1263-1269`。）
+
+**症状**：服务端 RPC 强制刷新返回 `providers: 3`、toast 也显示 3 家，但 TUI 弹窗列表仍是 2 家。
+
+**正确写法**（与删除/改名后刷新列表同一套，`view/connect.ts` 的 `reloadIntegrations`）：
+
+```ts
+ctx.data.location.integration.invalidate(ctx.location)
+await ctx.data.location.integration.sync(ctx.location)
+```
+
+**另一个坑：进度模态别自己秒清。** `dialog.alert(...)` 本质是 `dialog.replace(...)`（同步打开），
+`void alert(...)` + 刷新一结束就在 `finally { dialog.clear() }` 会把模态在下一帧抹掉（快则一帧都看不到）。
+要么让后续弹窗（如重开的列表）自然 `replace` 顶替它，要么在「无后续弹窗」的分支里显式 `clear()`。
+
 ## 与本仓库的关系
 
 `opencode-tui-usage` 目前只提供侧边栏内容（`ctx.ui.sidebar`），未注册任何 slash 命令。

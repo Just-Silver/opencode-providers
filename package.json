@@ -1,6 +1,6 @@
 {
   "name": "@justsilver/opencode-providers",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "type": "module",
   "description": "Register providers missing from the models.dev catalog in OpenCode V2 from a self-hosted registry — no opencode.json needed",
   "license": "MIT",

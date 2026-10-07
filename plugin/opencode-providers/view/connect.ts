@@ -40,7 +40,10 @@ export async function connectProviders(ctx: Context): Promise<void> {
         label: { confirm: "Force refresh" },
       })
       if (confirmed) {
-        if (await refreshWithProgress(ctx)) {
+        const ok = await refreshWithProgress(ctx)
+        // No dialog follows this branch, so close the refresh modal ourselves.
+        ctx.ui.dialog.clear()
+        if (ok) {
           ctx.ui.toast.show({
             variant: "info",
             message: "Reloaded. Run /connect-providers again to connect a provider.",
@@ -88,21 +91,17 @@ export async function connectProviders(ctx: Context): Promise<void> {
 }
 
 /**
- * Re-fetch the registry behind a blocking modal, then drop the modal.
+ * Show the "Refreshing registry…" modal and force a refresh.
  *
- * `dialog.alert` is the only JSX-free primitive that actually blocks: while it
- * is open the host pushes the `modal` keymap mode, so the prompt (and therefore
- * `/connect-providers` and the `ctrl+r` binding that lives on the list dialog)
- * is unreachable. The modal has `ok`/`esc` affordances, but we always close it
- * ourselves in `finally` — the user never has to.
+ * The modal is intentionally **not** cleared here: clearing it the moment the
+ * refresh resolves raced the renderer and turned it into a sub-frame flash the
+ * user never sees. The caller closes it explicitly (the empty state, which opens
+ * no follow-up dialog) or lets the reopened dialog replace it (the list state),
+ * so it stays up for the whole refresh.
  */
 async function refreshWithProgress(ctx: Context): Promise<boolean> {
   void ctx.ui.dialog.alert({ title: "Connect providers", message: "Refreshing registry…" })
-  try {
-    return await forceRefresh(ctx)
-  } finally {
-    ctx.ui.dialog.clear()
-  }
+  return forceRefresh(ctx)
 }
 
 /**
@@ -134,7 +133,10 @@ async function doRefresh(ctx: Context): Promise<boolean> {
       ctx.ui.toast.show({ variant: "error", message: `Registry refresh failed: ${detail}` })
       return false
     }
-    ctx.data.location.integration.invalidate(ctx.location)
+    // `invalidate` alone only drops the sync marker — it does not refetch, so
+    // `list()` would keep returning the stale integrations. `reloadIntegrations`
+    // also awaits the sync, so the reopened list shows the freshly registered set.
+    await reloadIntegrations(ctx)
     ctx.ui.toast.show({
       variant: "success",
       message: `Registry refreshed: ${result.providers ?? 0} providers, ${result.models ?? 0} models`,

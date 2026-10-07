@@ -28,6 +28,7 @@ function harness(input: {
     connectKey: [] as Array<{ integrationID: string; key: string }>,
     refresh: 0,
     invalidate: 0,
+    sync: 0,
     toast: [] as any[],
     alert: [] as any[],
     selectOptions: [] as any[],
@@ -90,7 +91,9 @@ function harness(input: {
           invalidate: () => {
             calls.invalidate += 1
           },
-          sync: async () => {},
+          sync: async () => {
+            calls.sync += 1
+          },
         },
       },
     },
@@ -140,24 +143,32 @@ function harness(input: {
 
 // ─── forceRefresh：纯逻辑（不含阻塞模态） ───
 
-test("forceRefresh 成功：调 rpc.refresh、invalidate、success toast", async () => {
-  const seen = { refresh: 0, toasts: [] as any[], invalidated: 0 }
+test("forceRefresh 成功：调 rpc.refresh、invalidate + sync、success toast", async () => {
+  const seen = { refresh: 0, toasts: [] as any[], invalidated: 0, synced: 0 }
   const ctx = {
     location: {},
     client: {
       rpc: () => ({
         refresh: async () => {
           seen.refresh += 1
-          return { ok: true, providers: 2, models: 2, source: "network", fetchedAt: 1 }
+          return { ok: true, providers: 3, models: 3, source: "network", fetchedAt: 1 }
         },
       }),
     },
     ui: { toast: { show: (o: any) => seen.toasts.push(o) } },
-    data: { location: { integration: { invalidate: () => void (seen.invalidated += 1) } } },
+    data: {
+      location: {
+        integration: {
+          invalidate: () => void (seen.invalidated += 1),
+          sync: async () => void (seen.synced += 1),
+        },
+      },
+    },
   }
   assert.equal(await forceRefresh(ctx as any), true)
   assert.equal(seen.refresh, 1)
   assert.equal(seen.invalidated, 1)
+  assert.equal(seen.synced, 1, "刷新后必须 sync，否则 list() 仍是旧数据")
   assert.equal(seen.toasts[0]?.variant, "success")
 })
 
@@ -201,7 +212,7 @@ test("非空态：列表带 'Force refresh' + ctrl+r 的 action", async () => {
   assert.equal(action.selection, "none")
 })
 
-test("按 Force refresh：先上阻塞模态，刷新后清掉，再重开列表", async () => {
+test("按 Force refresh：上阻塞模态 → 刷新 → invalidate + sync → 重开列表", async () => {
   const h = harness({ script: [{ kind: "action", title: "Force refresh" }, { kind: "select" }] })
   await connectProviders(h.ctx)
 
@@ -209,9 +220,33 @@ test("按 Force refresh：先上阻塞模态，刷新后清掉，再重开列表
   assert.match(h.calls.alert[0].message, /Refreshing/)
   assert.equal(h.calls.refresh, 1)
   assert.equal(h.calls.invalidate, 1)
-  assert.ok(h.calls.clear >= 1, "刷新结束必须撤掉模态")
+  assert.equal(h.calls.sync, 1, "刷新后必须 sync，重开的列表才不是旧数据")
+  assert.equal(h.calls.clear, 1, "onTrigger 关掉原列表弹窗；刷新模态由重开的列表顶掉")
   assert.equal(h.calls.selectOptions.length, 2, "刷新后应重开供应商列表")
   assert.ok(h.calls.toast.some((toast) => toast.variant === "success"))
+})
+
+test("按 Force refresh：重开的列表读到刷新后的新快照（而非 list() 旧值）", async () => {
+  const provider = (id: string) => ({
+    id,
+    name: id,
+    metadata: { source: "opencode-providers" },
+    connections: [],
+  })
+  let snapshot = [provider("acme")]
+  const h = harness({
+    integrations: () => snapshot,
+    script: [{ kind: "action", title: "Force refresh" }, { kind: "select" }],
+    refresh: async () => {
+      snapshot = [provider("acme"), provider("beta")]
+      return { ok: true, providers: 2, models: 2, source: "network", fetchedAt: 1 }
+    },
+  })
+  await connectProviders(h.ctx)
+
+  assert.equal(h.calls.sync, 1)
+  assert.equal(h.calls.selectOptions.length, 2, "刷新后应重开供应商列表")
+  assert.equal(h.calls.selectOptions[1].options.length, 2, "重开的列表应含刷新后新增的供应商")
 })
 
 test("空态：confirm 确认后走阻塞刷新并提示已重载", async () => {
