@@ -10,17 +10,25 @@
  *   - `Provider.ID.make` / `Integration.ID.make` are identity at runtime
  *   - `Provider.Info.empty(id)` is `{ id, name: id, activation: "auto", package: "" }`
  *     and every field is overridden below anyway
+ *   - `Rpc.define` is the identity function and plain JSON Schema is accepted,
+ *     so `rpc.ts` needs no `@opencode/*` either
  *
  * It registers an integration (single `key` method) and a provider
  * (`activation: "auto"`) per registry entry. Credentials are never touched:
  * opencode injects them by matching `provider.integrationID` to the integration
  * the key was stored under. No `env` method is declared on purpose — env is a
  * silent, non-interactive path and this plugin is `/connect`-only.
+ *
+ * The registry lives in a closure-local `state`, and both transforms read it at
+ * call time, so the force-refresh RPC can populate a registry that was
+ * unavailable at startup.
  */
 
 import { buildProviderModels, buildProviderSettings } from "./registry/models.ts"
 import { DEFAULT_REGISTRY_URL, loadRegistry } from "./registry/source.ts"
-import type { RegistryCacheEntry } from "./registry/source.ts"
+import type { RegistryCacheEntry, RegistryStore } from "./registry/source.ts"
+import type { Registry } from "./registry/schema.ts"
+import { registryRpc, type RefreshSummary } from "./rpc.ts"
 
 const PLUGIN_ID = "opencode-providers"
 
@@ -48,8 +56,20 @@ interface SetupContextLike {
     get(key: string): Promise<unknown>
     set(key: string, value: unknown): Promise<void>
   }
-  readonly integration: { transform(callback: (editor: IntegrationEditorLike) => void): Promise<unknown> }
-  readonly provider: { transform(callback: (editor: ProviderEditorLike) => void): Promise<unknown> }
+  readonly integration: {
+    transform(callback: (editor: IntegrationEditorLike) => void): Promise<unknown>
+    reload(): Promise<unknown>
+  }
+  readonly provider: {
+    transform(callback: (editor: ProviderEditorLike) => void): Promise<unknown>
+    reload(): Promise<unknown>
+  }
+  readonly rpc: {
+    register(
+      definition: unknown,
+      handlers: Record<string, (input: unknown, context: unknown) => Promise<unknown>>,
+    ): Promise<unknown>
+  }
 }
 
 export default {
@@ -61,32 +81,60 @@ export default {
     const url = typeof ctx.options.registryUrl === "string" ? ctx.options.registryUrl : DEFAULT_REGISTRY_URL
     // Cache per URL: switching the registry URL must not keep serving the old body for a TTL.
     const cacheKey = `registry-cache:${url}`
-    const result = await loadRegistry({
-      url,
-      fetch: globalThis.fetch,
-      store: {
-        get: async () => asCacheEntry(await ctx.storage.get(cacheKey)),
-        set: async (entry) => {
-          await ctx.storage.set(cacheKey, entry)
-        },
+    const store: RegistryStore = {
+      get: async () => asCacheEntry(await ctx.storage.get(cacheKey)),
+      set: async (entry) => {
+        await ctx.storage.set(cacheKey, entry)
       },
-    })
+    }
 
+    // Closure-local: repeated `setup` calls (config hot reload) must not share state.
+    const state: { registry?: Registry } = {}
+
+    // Force refresh: bypass the TTL, re-register, and tell the TUI what it got.
+    // A `stale-cache` result means upstream was unreachable, so it counts as a
+    // failure and leaves `state` (and the registered providers) untouched.
+    const refresh = async (): Promise<RefreshSummary> => {
+      const result = await loadRegistry({ url, fetch: globalThis.fetch, store, force: true })
+      if (!result.ok) return { ok: false, errors: [...result.errors] }
+      if (result.source === "stale-cache") {
+        return { ok: false, errors: ["registry refresh failed; serving the cached copy"] }
+      }
+      state.registry = result.registry
+      await ctx.integration.reload()
+      await ctx.provider.reload()
+      return {
+        ok: true,
+        providers: Object.keys(result.registry.providers).length,
+        models: countModels(result.registry),
+        source: result.source,
+        fetchedAt: result.fetchedAt,
+      }
+    }
+
+    await ctx.rpc.register(registryRpc, { refresh })
+
+    const result = await loadRegistry({ url, fetch: globalThis.fetch, store })
     if (!result.ok) {
       console.error(`[${PLUGIN_ID}] registry unavailable (${url}): ${result.errors.join("; ")}`)
-      return
-    }
-    if (result.source === "stale-cache") {
-      console.warn(
-        `[${PLUGIN_ID}] registry refresh failed; serving cache from ${new Date(result.fetchedAt).toISOString()}`,
-      )
+    } else {
+      if (result.source === "stale-cache") {
+        console.warn(
+          `[${PLUGIN_ID}] registry refresh failed; serving cache from ${new Date(result.fetchedAt).toISOString()}`,
+        )
+      }
+      if (result.warnings.length > 0) {
+        console.warn(`[${PLUGIN_ID}] skipped registry entries: ${result.warnings.join("; ")}`)
+      }
+      state.registry = result.registry
     }
 
-    const { registry } = result
-    const entries = Object.entries(registry.providers)
-
+    // Always register both transforms (no-op while `state.registry` is empty), so a
+    // later force refresh can recover from a registry that was unavailable at boot.
     await ctx.integration.transform((editor) => {
-      for (const [id, provider] of entries) {
+      const registry = state.registry
+      if (registry === undefined) return
+      for (const [id, provider] of Object.entries(registry.providers)) {
         editor.update(id, (integration) => {
           integration.name = provider.name
           // `metadata` is part of the integration ref and surfaces in `Integration.Info`,
@@ -104,7 +152,9 @@ export default {
     })
 
     await ctx.provider.transform((editor) => {
-      for (const [id, provider] of entries) {
+      const registry = state.registry
+      if (registry === undefined) return
+      for (const [id, provider] of Object.entries(registry.providers)) {
         const models = buildProviderModels(registry, id, provider)
         if (models.length === 0) continue
         const settings = buildProviderSettings(provider)
@@ -125,10 +175,17 @@ export default {
   },
 }
 
+function countModels(registry: Registry): number {
+  let total = 0
+  for (const provider of Object.values(registry.providers)) total += Object.keys(provider.models).length
+  return total
+}
+
 function asCacheEntry(value: unknown): RegistryCacheEntry | undefined {
   if (typeof value !== "object" || value === null) return undefined
   const entry = value as Partial<RegistryCacheEntry>
   if (typeof entry.fetchedAt !== "number" || typeof entry.body !== "string") return undefined
   if (entry.etag !== undefined && typeof entry.etag !== "string") return undefined
+  if (entry.revision !== undefined && typeof entry.revision !== "string") return undefined
   return entry as RegistryCacheEntry
 }
