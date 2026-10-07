@@ -90,7 +90,7 @@ jobs:
           esac
 
           if [ "$tag" = "latest" ] && [ "${INPUT_STABLE:-false}" != "true" ]; then
-            echo "::error::${name}@${version} 是正式版：本流水线不允许直接发 latest，请到 Actions → Release → Run workflow 勾选 publish + stable"
+            echo "::error::${name}@${version} 是正式版：本流水线不允许直接 push 正式 tag 发布；请到 Actions → Release → Run workflow 勾选 publish + stable（它会发布到 latest 并建 tag/Release）"
             exit 1
           fi
 
@@ -102,13 +102,35 @@ jobs:
           echo "→ npm publish --tag $tag（$name@$version）"
           npm publish --tag "$tag"
 
-      - name: 建/更新 GitHub Release
-        if: github.event_name == 'push'
+      # 手动发布（含正式版）先补 tag：tag 由 GITHUB_TOKEN 推送，不会反过来触发本工作流。
+      - name: 建 tag（仅手动 publish）
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="v$(node -p "require('./package.json').version")"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+            echo "::notice::tag $tag 已存在，跳过"
+            exit 0
+          fi
+          git tag "$tag"
+          git push origin "$tag"
+          echo "✓ 已建并推送 tag $tag"
+
+      - name: 建/更新 GitHub Release
+        if: github.event_name == 'push' || inputs.publish == true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "push" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="v$(node -p "require('./package.json').version")"
+          fi
+          echo "→ Release $tag"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release edit "$tag" --title "$tag" --notes-file release-notes.md
           else

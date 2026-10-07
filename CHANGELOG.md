@@ -7,6 +7,37 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-07
+
+> 首个**正式版**（由 `0.1.0-beta.0` → `0.1.0-beta.2` 三个预发布版本稳定而来）；npm 的 `latest` 指向它。
+
+### Added
+
+- 自维护注册表 `registry/registry.json` + `registry/registry.schema.json`：共享 `models` 表 + provider `base` 引用/覆盖，
+  带 `schemaVersion` —— 改数据**不需要**发插件版本
+- 注册表收入两家真实供应商：**Command Code**（`https://api.commandcode.ai/provider/v1`）与
+  **R4 Coder**（`https://api.r4.codes/v1`）。二者共享 `deepseek-v4.1-flash`
+  （context 1048576 / output 393216，`reasoningEffort` 变体 low/high/max）；Command Code 用 `modelID` 覆盖成 `deepseek/deepseek-v4.1-flash`
+- server 入口：按注册表注册 integration（只声明 `key` 方法）与 provider（`activation: "auto"`）及其模型；
+  拉取 6h TTL + `ETag` + 失败沿用旧缓存（`ctx.storage`）
+- TUI 入口 `/connect-providers`：选供应商 → 贴 API Key / 切换账号，与内置 `/connect` 共用同一张凭据表
+- 两种安装方式：npm 包（`"plugins": ["@justsilver/opencode-providers"]`）与安装脚本（整目录复制到
+  `~/.config/opencode/plugins/`，支持 `--local` / `-Local` 从工作树部署）
+- 预发布优先的发版流水线：CD 走 OIDC（自动签名 provenance），预发布发 npm 的 `next`；
+  正式版必须**手动** Run workflow 勾 `publish` + `stable`（该次运行发布到 `latest` 并补 tag + GitHub Release）
+- `.opencode/skills/opencode-providers-registry`：维护注册表的技能（两条路由 + 最小字段铁律 + 协议 → package）
+
+### Fixed
+
+- **`/connect-providers` 在输入框里"看不见"**：命令图层补 `mode: "global"`（图层默认 `base`，而提示框 push 的是
+  `composer`／补全时 `autocomplete` → 不可达，命令不进补全列表）
+- 仓库自身不再是插件发现根（源码移到 `plugin/opencode-providers/`），避免在仓库里跑 opencode 时与全局安装**同 id 相撞**
+  （supervisor 会把后者标成 `failed` + `Duplicate plugin ID`）
+
+### Changed
+
+- 注册表移出仓库根：`registry.json` → `registry/registry.json`（`$id` 同步）；插件默认拉取地址与**缓存键**同步改为含 URL，换地址立即重拉
+
 ## [0.1.0-beta.2] - 2026-10-07
 
 ### Added
@@ -58,7 +89,8 @@
 - 插件源码从 `.opencode/plugins/opencode-providers/` 移到 `plugin/opencode-providers/`：仓库自身不再是插件发现根，避免在仓库里跑 opencode 时与全局安装的同 id 副本相撞（`Duplicate plugin ID` → 面板里一条 `failed`）
 - 安装后**通常无需重启**（插件目录被文件监视热重载），不再要求 `opencode service restart`
 
-[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.1.0-beta.2...HEAD
+[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0
 [0.1.0-beta.2]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.2
 [0.1.0-beta.1]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.1
 [0.1.0-beta.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0-beta.0
