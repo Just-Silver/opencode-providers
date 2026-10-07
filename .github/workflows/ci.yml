@@ -29,3 +29,5 @@ jobs:
         run: node --test
       - name: 注册表源一致性（分文件 → 聚合 + index/revision）
         run: node .opencode/skills/opencode-providers-registry/scripts/registry.mjs validate
+      - name: 注册表体检（悬空 base 引用 / 孤儿共享模型 / 重复 baseURL / input 缺 text…）
+        run: node .opencode/skills/opencode-providers-registry/scripts/registry.mjs check --strict

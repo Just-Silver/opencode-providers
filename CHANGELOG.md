@@ -7,6 +7,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- 注册表维护 CLI（`.opencode/skills/opencode-providers-registry/`）扩展：
+  - **复用共享模型（路线 C）**：`list`/`search`/`show` 现在暴露**顶层共享模型**（含未被引用的），新增模型前先 `search`，命中即用
+    `add-*/--base <lab>/<model>` 复用（不再逐项重问 limit/变体/模态）；`add-*` 在参数与某共享模型相同时还会打一行软提示。
+  - **改**：`set-provider` / `set-model` / `set-shared-model`——字段补丁（只改传入字段）+ `--unset a,b` 清空。
+  - **删**：`remove-provider` / `remove-model` / `remove-shared-model`——带安全约束（不许删空 provider、不许删仍被 `base` 引用的共享模型）。
+  - **体检**：`check [--strict]`——揪出悬空 `base` 引用（会让运行期整家跳过）、孤儿共享模型、内联与共享重复、重复 baseURL、`input` 缺 text、空目录。
+  - CLI 拆分为入口 + `scripts/lib/` 子模块（`cli`/`store`/`spec`/`report`/`commands-{read,write}`），避免单文件膨胀。
+- CI 增加 `registry.mjs check --strict` 一步。
+
 ## [0.3.1] - 2026-10-07
 
 ### Fixed

@@ -394,7 +394,12 @@ OAuth 在 `resolve` 时若距 `expires` 不足 5 分钟会自动 refresh（`:696
 ## 设计定案（0.1.0 起已实现）
 
 - 注册表：GitHub raw 托管（`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`），仿 models.dev **源头**结构
-  （共享模型 `base` 引用/覆盖），多家供应商共享；插件运行期拉 manifest、按 `revision` 决定是否重拉子文件并聚合成一份。
+  （共享模型 `base` 引用/覆盖，对应 models.dev 的 `base_model`；`registry/models/<lab>/<model>.json` 就是它的 `models/` 那一层），多家供应商共享；插件运行期拉 manifest、按 `revision` 决定是否重拉子文件并聚合成一份。
+  - **「按需拉取」只约束运行期插件**（聚合时仅拉 provider 实际引用到的 `base`，省 HTTP）；本地维护 CLI
+    （`.opencode/skills/opencode-providers-registry/scripts/registry.mjs`）跑在工作树上，`list`/`search`/`show` 会列全整棵 `models/**`（含未被引用的），
+    因此「新增模型前先 `search`，命中共享模型就 `add-*/--base`」可行。
+  - CLI 另有 `check`（悬空 `base` 引用 / 孤儿共享模型 / 重复 baseURL / `input` 缺 text / 空目录；`--strict` 时提醒也算失败）与
+    `set-*` / `remove-*`（字段补丁 + `--unset`；删除带安全约束：不许删空 provider、不许删仍被引用的共享模型）。
 - 参数：全部自维护（不推断）；**不调**供应商 `/v1/models`。
 - 注册/激活：注册表里每家都注册 + `activation: "auto"` + integration 只声明 `key`（决策依据见下）。
 

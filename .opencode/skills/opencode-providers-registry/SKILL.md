@@ -1,6 +1,6 @@
 ---
 name: opencode-providers registry
-description: Use when adding or changing providers or models in this repository's registry (registry/index.json manifest + registry/providers/<id>/{provider,models}.json + registry/models/<lab>/<model>.json) — 新增供应商（id / 显示名 / 协议包 / baseURL）、给某家加模型（modelID / limit / 变体）、改 baseURL 或上下文长度，或用户说「维护注册表 / 把某家加进去 / 加个模型」。改用随技能 CLI（.opencode/skills/opencode-providers-registry/scripts/registry.mjs），**不要直接读整份注册表**。
+description: Use when adding or changing providers or models in this repository's registry (registry/index.json manifest + registry/providers/<id>/{provider,models}.json + registry/models/<lab>/<model>.json) — 新增供应商（id / 显示名 / 协议包 / baseURL）、给某家加模型（modelID / limit / 变体）、**复用已有共享模型（新增前先 search，命中就 --base）**、改参数（set-*）、删除（remove-*），或用户说「维护注册表 / 把某家加进去 / 加个模型 / 改模型删模型」。改用随技能 CLI（.opencode/skills/opencode-providers-registry/scripts/registry.mjs），**不要直接读整份注册表**。
 ---
 
 # 注册表维护（分文件 + manifest）
@@ -11,6 +11,11 @@ description: Use when adding or changing providers or models in this repository'
 插件运行期从 GitHub raw 拉 manifest，按 `revision` 决定要不要重拉各分文件、聚合成一份（6h TTL + `ETag` + 失败沿用旧缓存）。
 **改数据不需要发插件版本**，但要让运行中的实例跟上：`git push origin main` → 触发一次插件重载
 （重启 / 或在 `/connect-providers` 弹窗里按 `Ctrl+R` 强制刷新），否则最多等 6h。
+
+> 结构照 **models.dev 的源头那层**：`registry/models/<lab>/<model>.json` ≡ models.dev 的 `models/<lab>/<model>.toml`
+> （供应商无关的模型元数据，可被多家复用；models.dev 用 `base_model`，本仓用 `base`），`providers/<id>/…` ≡ 它的 per-provider 层。
+> 注意：「**按需拉取**」（运行期聚合只拉 provider 引用到的 `base`）**只约束插件**（省 HTTP）；CLI 跑在本地工作树上，
+> `list`/`search` 会列全整棵 `models/**` —— 这正是「新增前先搜、命中就复用」的依据。
 
 ## 铁律 0：禁止 agent 直接读 `registry/**` 任何文件
 
@@ -23,34 +28,63 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
 
 | 子命令 | 作用 |
 |---|---|
-| `list [--json]` | 枚举所有供应商 + 各自已注册模型（含有效 `modelID`/`limit`/变体） |
-| `search <关键词> [--json]` | 按供应商 id/名称 或 模型 key/名称/`modelID` 搜索 |
-| `show <供应商id> [模型key] [--json]` | 只看一家/一个模型的 JSON（不读整份文件） |
-| `validate` | 全量校验 + 计数（供应商/模型/顶层共享模型）；并核对 `index.json`/目录/`revision` 一致 |
+| `list [--json]` | 枚举所有供应商 + 各自模型 + **顶层共享模型**（含未被引用的） |
+| `search <关键词> [--json]` | 按供应商 id/名称、模型 key/名称/`modelID`、**共享模型 ref/名称** 搜索（新增前必跑） |
+| `show <供应商id> [模型key]` / `show <lab>/<model>` | 只看一家/一个模型/一个共享模型的 JSON（不读整份文件） |
+| `validate` | 组装 + schema + `index.json`/目录/`revision` 一致性 |
+| `check [--strict]` | 更全的体检：**悬空 `base` 引用（会害插件整家跳过）**、孤儿共享模型、内联重复、baseURL 重复、`input` 缺 text、空目录；`--strict` 时提醒也算失败 |
 | `sync` | 重算 `revision` 并重写 `index.json`（手改过子文件后跑它） |
-| `add-provider …` | 新增供应商（含首个模型）；id 或 baseURL 冲突直接报错 |
-| `add-model …` | 给已有供应商加模型；同一模型 key 冲突直接报错 |
-| `add-shared-model …` | 新增顶层共享模型（多家共用同一模型时用） |
+| `add-provider …` / `add-model …` / `add-shared-model …` | 新增（冲突直接报错） |
+| `set-provider …` / `set-model …` / `set-shared-model …` | 改参数：**字段补丁**（只改传入的，未传保持）+ `--unset a,b` 清空 |
+| `remove-provider …` / `remove-model …` / `remove-shared-model …` | 删除（见「路由」里的安全约束） |
 
-只看不写先跑 `list`；不确定有没有再跑 `search`。**所有写命令在落盘前都会重跑 `parseRegistry`，冲突/非法一律退出码 1 且不写文件。**
+只看不写先跑 `list`；**新增/改之前先 `search`**。**所有写命令在落盘前都会重跑 `parseRegistry`，冲突/非法一律退出码 1 且不写文件。**
 （调试/演练可用 `--root <注册表目录>` 指向一份副本，不动仓库里的注册表。）
 
-## 两种路由
+## 铁律 1：新增模型前先 `search`，命中共享模型就复用（路线 C）
+
+**每次新增模型前先搜一次**（新供应商的首个模型、给已有供应商加模型都一样）：
+
+```bash
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<模型 key / 显示名 / 上游 modelID>"
+```
+
+- 输出里「**顶层共享模型**」一节就是可复用候选（= `registry/models/<lab>/<model>.json`）。
+- **命中 → 路线 C**：用 `question` 让用户确认复用哪一个（选项 = 命中项、推荐置顶），选中即 `add-*/--base <lab>/<model>`，
+  **不再问 limit / 名称 / 变体 / 输入模态**（都来自共享模型；只有上游 id 不同才用 `--model-id` 覆盖）。
+- **命中内联模型**（只写在某家 `providers/<id>/models.json`、没进 `models/`）→ `--base` 用不了：先 `add-shared-model`
+  提升为共享模型，再 `--base`（可顺手把源 provider 也改成 `base`，免得留重复定义）。
+- **没命中 → 路线 A/B**，照下面的问题模板逐项问。
+- **绝不自动加 `--base`**：复用与否由用户在提问里点选，技能不拿默认值替用户决定。
+
+## 路由
 
 | 路由 | 场景 | 收集项 |
 |---|---|---|
-| **A 新增供应商** | 这家还不存在于注册表 | 供应商 id、显示名称、协议（→ package）、baseURL，**外加首个模型**（key、名称、`modelID`、`limit`、变体、输入模态） |
+| **A 新增供应商** | 这家还不存在于注册表 | 供应商 id、显示名称、协议（→ package）、baseURL，**外加首个模型** |
 | **B 给已有供应商加模型** | 供应商已在注册表，只加模型 | 模型 key、显示名称、上游 `modelID`、`limit`、变体 |
+| **C 复用已有共享模型** | 「铁律 1」的 `search` 命中顶层共享模型 | 供应商信息（仅 A）+ 模型 key + 用哪个共享模型 + 可选 `modelID` 覆盖 |
+| **改** | 改供应商/模型/共享模型参数 | 用 `set-*`（字段补丁 + `--unset`） |
+| **删** | 删供应商/模型/共享模型 | 用 `remove-*`（安全约束见下） |
 
 > 路由 A 必须带**一个模型**：注册表 schema 要求每个 provider 的 `models` 非空，脚本也据此拒绝空模型。
 > 先 `list`/`search` 确认这家还不存在；已存在就走路由 B，别重复建供应商（会撞 id 报错）。
 
-不在本技能范围：改插件代码 / 加 `env` 认证 / 账号重命名删除（CLI 也没有覆盖/删除子命令）。
+删除的安全约束（CLI 强制）：
+
+- `remove-model`：不许删某家**最后一个**模型（会变空，schema 不允许）→ 要删整家用 `remove-provider`。
+- `remove-provider`：不许删注册表里**最后一个**供应商。
+- `remove-shared-model`：**仍被 `base` 引用就拒绝**（悬空引用会让那家在插件里被整家跳过）；先 `set-model --unset base`（或 `remove-model`）解除引用再删。
+
+不在本技能范围：改插件代码 / 加 `env` 认证。
 
 ## 一次性收集：Questions 模板（**原样照搬**）
 
 调用 `question` 工具，把下面模板**整段复制**到 `questions` 数组里；**用户已经给出的字段，从数组里删掉对应问题**，
 其余问题原样保留（不要改措辞、不要改顺序、不要新增问题）——这样每次提问都一致。
+
+> 先跑「铁律 1」的 `search`：**命中且用户选了复用 → 用下面的路由 C 模板，并从 A/B 模板里删掉所有模型参数问题**
+> （key / 名称 / `modelID` / `limit` / 变体 / 输入模态），只在路线 A 时保留供应商信息问题。**没命中** → 才用 A/B 模板逐项问。
 
 ### 路由 A：新增供应商
 
@@ -214,7 +248,31 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
 }
 ```
 
-## 用 CLI 写（路由 A / B）
+### 路由 C：复用已有共享模型（`search` 命中时）
+
+**这是唯一的「动态选项」模板**：把 `search` 命中的共享模型逐条填进 `options`（推荐项置顶），不要照搬占位文字。
+
+```json
+{
+  "questions": [
+    {
+      "header": "复用已有模型",
+      "question": "search 命中以下已有共享模型（见选项）。要直接复用其中一个吗？",
+      "options": [
+        { "label": "复用 <lab>/<model> (推荐)", "description": "只写 base 引用；只有上游 id 不同才用 --model-id 覆盖；不再问 limit/变体/模态" },
+        { "label": "复用 <另一个命中的 lab/model>", "description": "search 命中的每一项各列一条；没有第二个就删掉这条" },
+        { "label": "不复用，按普通参数新增", "description": "回到路线 A/B 逐项问 limit/变体/模态" }
+      ]
+    }
+  ]
+}
+```
+
+- 用户点「复用 X」→ `add-provider`/`add-model` 加 `--base X`（需要时再补 `--model-id`）；**不再发 A/B 的模型参数问题**。
+- 用户点「不复用」→ 回到 A/B 模板。
+- 命中是**内联模型**（非共享）时，问题里改成「提升为共享再复用」，命令走 `add-shared-model` 再 `add-*/--base`。
+
+## 用 CLI 写（路由 A / B / C）
 
 路由 A —— 供应商 + 首个模型一次建好（`--protocol` 见下表；`--variant` 可多次给）：
 
@@ -236,6 +294,28 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
   --context 64000 --output 8000
 ```
 
+路由 C —— `search` 命中共享模型，直接复用（不重复写 limit/变体）：
+
+```bash
+# search 已命中 deepseek/deepseek-v4.1-flash → 加 --base 引用即可
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-provider \
+  --id open-design --name "Open Design" --baseurl https://amr-link.open-design.ai/v1 \
+  --model deepseek-v4.1-flash --base deepseek/deepseek-v4.1-flash
+```
+
+改 / 删：
+
+```bash
+# 改：字段补丁（只改传入的），--unset 清空；共享模型改动会波及所有引用方
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs set-provider --id r4-coder --baseurl https://api.r4.codes/v2
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs set-provider --id r4-coder --unset baseurl   # 清空 baseURL
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs set-model --provider r4-coder --key deepseek-v4.1-flash --context 200000 --output 64000
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs set-shared-model --lab deepseek --key deepseek-v4.1-flash --unset input
+# 删：remove-shared-model 仍被引用会拒绝（先 --unset base 解除引用）
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs remove-model --provider r4-coder --key r4-mini
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs remove-shared-model --ref solo/only
+```
+
 要点：
 
 - `limit` 要写就写全：`--context` 与 `--output` 必须同时给；**都没给又没用 `--base` 会直接报错**（参数不猜）。
@@ -243,7 +323,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
   多选问题的 label 是展示名（如「纯文本 (text)」），传给 `--input` 的是**括号里的英文单词**（`text,image`）。
   只选「纯文本」时可以省略 `--input`（等价于默认 `["text"]`）；要开图片**必须显式写**。
 - `--model-id` 省略（或等于 key）就不写 `modelID`；`--model-name` 省略就不写 `name`（**不会**拿供应商名顶替）。
-- 模型与某个已存在的**顶层共享模型**参数完全一致时，用 `add-model --base <lab>/<model>` 引用，别复制一份（见下节）。
+- 模型与某个已存在的**顶层共享模型**参数一致时，用 `add-*/--base <lab>/<model>` 引用（铁律 1 / 路线 C），别复制一份；CLI 在参数完全相同时还会打一行软提示。
 - `add-provider` 的 `--baseurl` 若已被别家占用会报错，确属有意才加 `--force`。
 
 ## 铁律：只用最小字段（由 CLI 强制）
@@ -303,8 +383,9 @@ CLI **只**接受这些字段并据此写文件，其它一律不给入口：
 ## 同一模型被多家共用：顶层 `models` + `base`
 
 多家提供同一个模型（参数完全相同）时，把**共享参数**写到顶层 `models`，各 provider 用 `base` 引用，再覆盖差异（如 `modelID`）。
+这就是 models.dev 的 `base_model` 那一层。`list`/`search` 会列出所有共享模型（含未被引用的），供「新增前先搜」复用。
 本仓实例：共享模型 `deepseek/deepseek-v4.1-flash`（文件 `registry/models/deepseek/deepseek-v4.1-flash.json`）被
-`command-code`（`modelID: deepseek/deepseek-v4.1-flash`）与 `r4-coder`（默认 = key）共用。
+`command-code`（`modelID: deepseek/deepseek-v4.1-flash`）、`open-design`、`r4-coder` 共用。
 
 ```bash
 # 1) 先建顶层共享模型（只需一次）→ models/<lab>/<model>.json
@@ -323,9 +404,9 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 
 ## 步骤（每次改完都要走完）
 
-1. **先查**：`node … list`（或 `search <关键词>`）确认路由 A/B，并核对现有参数
-2. **再写**：`add-provider` / `add-model` / `add-shared-model`（冲突会报错、不会落盘）
-3. **自查**：`node … validate`（组装 + schema + index/目录/revision 一致）+ `node … show <供应商id>`（可选）+ `node --test`（含 CLI 分文件读写/sync/冲突用例）
+1. **先查（含搜共享模型）**：`node … search "<模型 key / 名称 / 上游 modelID>"` —— 先看有没有可复用的共享模型，据此定路由 A/B/C；并核对现有参数
+2. **再写**：`add-provider` / `add-model` / `add-shared-model`（C 就补 `--base`）；改/删用 `set-*` / `remove-*`（冲突/非法会报错、不会落盘）
+3. **自查**：`node … check`（悬空引用/孤儿/重复…）→ `node … validate`（组装 + schema + index/目录/revision 一致）→ `node --test`
 4. `git add -A && git commit -m "…"`（**中文**）→ `git push origin main`
 5. 让运行中的实例生效：重启 opencode（或在 `/connect-providers` 里按 `Ctrl+R` 强制刷新）
 6. 验证：
@@ -346,6 +427,9 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 | 和 `opencode.json` 的 `providers.<id>` 撞名 | 同 id **只留一边**；配置那份还会注入 `activation: enabled` 与明文 key |
 | 上游 400/404 | `modelID` 写错：要写**上游真实** id，不是 opencode 里的别名 |
 | 变体不生效 | `settings` 必须在 `variants[].settings`，不是模型级 `settings` |
-| CLI 报「供应商已存在」/「已存在模型」 | 说明该走路由 B 或换 key；CLI 不做覆盖/改名，别手改 JSON 绕过 |
+| CLI 报「供应商已存在」/「已存在模型」 | `add-*` 不覆盖：该走路由 B 或换 key；要改/删用 `set-*` / `remove-*`，别手改 JSON |
+| `check` 报「悬空引用」 | 某 provider 的 `base` 指向不存在的共享模型（该家会被运行期整家跳过）；`set-model … --unset base` 或补建该共享模型 |
+| `remove-shared-model` 报「仍被引用」 | 先 `set-model … --unset base`（或 `remove-model`）解除引用，再删 |
+| `check --strict` 退出码 1 | 有提醒（孤儿共享模型/内联重复/baseURL 重复/`input` 缺 text/空目录）；`--strict` 时提醒也算失败，按提示处理或去掉 `--strict` |
 | CLI 报「未通过 schema 校验」 | 参数组合非法（如 `--base` 指向不存在的共享模型）；按提示改参数重跑（写命令落盘前就校验，失败不写文件） |
 | `validate` 报错但运行期照常 | CLI 是**源码级全量严校验**（连没人引用的共享模型也校验），运行期是**逐家宽松**（坏的那家只跳过、其余照常）；按 CLI 提示修好即可 |

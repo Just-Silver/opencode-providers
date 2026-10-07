@@ -132,15 +132,16 @@
 
 # 技能（`.opencode/skills/`）
 
-- `opencode-providers-registry` —— 维护分文件注册表（`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`）：两条路由（新增供应商 / 给已有供应商加模型）、
+- `opencode-providers-registry` —— 维护分文件注册表（`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`）：**路由 A/B/C**（新增供应商 / 给已有供应商加模型 / **复用已有共享模型——新增前先 `search`，命中就 `--base`**）+ **改**（`set-provider`/`set-model`/`set-shared-model`，字段补丁 + `--unset`）+ **删**（`remove-provider`/`remove-model`/`remove-shared-model`，带安全约束：不许删空 provider、不许删仍被引用的共享模型）、
   **最小字段铁律**（严格只写最小字段，其余不写；模型**能力** `input` 由技能用多选问出后再写）、协议 → package（`/v1/chat/completions` /
   `/v1/responses` / `/v1/messages` 三种形态）、**一次性用 `question` 收集信息**、改完必须 push + 触发重载 + 验证。
   **agent 禁止直接读整份注册表**（会随供应商/模型增长而变大）：查/改全走随技能 CLI
-  `.opencode/skills/opencode-providers-registry/scripts/registry.mjs`
-  （`list` / `search` / `show` / `validate` / `sync` / `add-provider` / `add-model` / `add-shared-model`），写命令落盘前先组装 +
-  过 `parseRegistry` 校验，冲突（重复供应商 id / 重复模型 key / 占用 baseURL）直接报错、不写文件；路由 A/B 的 `question` 模板在 SKILL.md 里**原样照搬**。
+  `.opencode/skills/opencode-providers-registry/scripts/registry.mjs`（入口 + `scripts/lib/` 子模块：`cli`/`store`/`spec`/`report`/`commands-{read,write}`）
+  （`list` / `search` / `show` / `validate` / `check` / `sync` / `add-*` / `set-*` / `remove-*`），写命令落盘前先组装 +
+  过 `parseRegistry` 校验，冲突（重复供应商 id / 重复模型 key / 占用 baseURL / 悬空 `base`）直接报错、不写文件；路由 A/B 的 `question` 模板在 SKILL.md 里**原样照搬**，路由 C 用**动态选项**（把 `search` 命中填进选项）。
+  `list`/`search`/`show` 会暴露**顶层共享模型**（含未被引用的），`check` 做更全体检（悬空引用/孤儿/重复 baseURL/`input` 缺 text/空目录，`--strict` 时提醒也算失败）。
   `revision` = `providers/**` + `models/**` 全部文件按 posix 相对路径排序后的确定性哈希；写命令自动重算并重写 `index.json`，手改子文件后用 `sync` 补齐。
-  由 `tests/registry-cli.test.ts` 钉住（分文件读写 / `sync` / 冲突 / Windows 非法路径段）。
+  由 `tests/registry-cli.test.ts` 钉住（分文件读写 / `sync` / 冲突 / Windows 非法路径段 / 复用 / set-* / remove-* / check）。
   脚本用 Node（`.mjs`）而非 PowerShell：CI 在 ubuntu 跑 `node --test`，且校验逻辑是 TS（复用 `registry/schema.ts`，单一事实源）。
 - `.opencode/skills/` **不是**插件发现根（发现器只扫 `<config>/plugin`、`<config>/plugins`），放在这里安全。
 - 改这个技能要先做**基线对比测试**（无技能跑一遍看偏差 → 写/改技能 → 有技能再跑一遍），

@@ -190,17 +190,26 @@ const COMPARABLE_FIELDS = [
   "limit", "cost", "tools", "input", "output", "reasoningField", "maxTokensField", "variants",
 ]
 
-function comparableModel(value) {
+function comparableFields(value) {
   const out = {}
   for (const field of COMPARABLE_FIELDS) if (value[field] !== undefined) out[field] = value[field]
-  return JSON.stringify(out)
+  return out
 }
 
-/** 找到一个与 spec（忽略 `base`/`modelID`）参数完全相同的共享模型引用。 */
+const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+/**
+ * 找到一个「参数相同」的共享模型引用：内联模型**已写的字段**都要在共享模型里对得上
+ * （子集匹配 —— 共享模型多带的 `family`/`output` 等不算差异）。忽略 `base`/`modelID`。
+ */
 export function findIdenticalShared(tree, spec) {
   if (spec.base !== undefined) return undefined
-  const target = comparableModel(spec)
-  for (const [ref, model] of tree.shared) if (comparableModel(model) === target) return ref
+  const fields = comparableFields(spec)
+  const keys = Object.keys(fields)
+  if (keys.length === 0) return undefined
+  for (const [ref, model] of tree.shared) {
+    if (keys.every((field) => model[field] !== undefined && sameValue(model[field], fields[field]))) return ref
+  }
   return undefined
 }
 

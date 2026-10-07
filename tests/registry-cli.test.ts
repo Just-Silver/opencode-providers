@@ -340,3 +340,161 @@ test("能力多选：--input 写 input 模态", () => {
   assert.equal("tools" in spec, false, "tools 不属于最小配置，不应写入")
   assert.equal(cli(["validate"], root).status, 0)
 })
+
+test("list/search 暴露顶层共享模型（含未被引用的）；show 支持 <lab>/<model>", () => {
+  const root = freshRoot()
+  assert.equal(
+    cli(["add-shared-model", "--lab", "solo", "--key", "only", "--model-name", "Solo", "--context", "1000", "--output", "100"], root).status,
+    0,
+  )
+
+  const list = cli(["list"], root)
+  assert.equal(list.status, 0, list.stderr)
+  assert.match(list.stdout, /顶层共享模型（2）/)
+  assert.match(list.stdout, /solo\/only/)
+  assert.match(list.stdout, /deepseek\/deepseek-v4\.1-flash/)
+
+  const json = JSON.parse(cli(["list", "--json"], root).stdout)
+  const shared = json.sharedModels as Array<{ ref: string; usedBy: string[] }>
+  assert.ok(shared.some((m) => m.ref === "solo/only" && m.usedBy.length === 0))
+  assert.ok(shared.some((m) => m.ref === "deepseek/deepseek-v4.1-flash" && m.usedBy.includes("r4-coder")))
+
+  const search = cli(["search", "solo"], root) // 未被引用也能搜到
+  assert.equal(search.status, 0, search.stderr)
+  assert.match(search.stdout, /solo\/only/)
+
+  const show = cli(["show", "deepseek/deepseek-v4.1-flash"], root)
+  assert.equal(show.status, 0, show.stderr)
+  assert.match(show.stdout, /"context": 1048576/)
+})
+
+test("check：随仓通过；孤儿共享模型=提醒、--strict 失败；悬空引用=错误", () => {
+  const root = freshRoot()
+  assert.equal(cli(["check"], root).status, 0)
+  assert.equal(cli(["check", "--strict"], root).status, 0)
+
+  assert.equal(cli(["add-shared-model", "--lab", "solo", "--key", "only", "--context", "1", "--output", "1"], root).status, 0)
+  const warn = cli(["check"], root)
+  assert.equal(warn.status, 0, warn.stderr)
+  assert.match(warn.stdout, /未被引用的共享模型 "solo\/only"/)
+  const strict = cli(["check", "--strict"], root)
+  assert.equal(strict.status, 1)
+  assert.match(strict.stderr, /--strict/)
+
+  const modelsPath = file(root, "providers", "r4-coder", "models.json")
+  const models = readJson(modelsPath)
+  models["deepseek-v4.1-flash"].base = "ghost/none"
+  writeFileSync(modelsPath, `${JSON.stringify(models, null, 2)}\n`)
+  const bad = cli(["check"], root)
+  assert.equal(bad.status, 1)
+  assert.match(bad.stderr, /悬空引用/)
+})
+
+test("set-model：字段补丁 + --unset 清空；非法 --unset 报错", () => {
+  const root = freshRoot()
+  const set = cli(
+    ["set-model", "--provider", "r4-coder", "--key", "deepseek-v4.1-flash", "--model-name", "DS", "--unset", "base", "--context", "1000", "--output", "100"],
+    root,
+  )
+  assert.equal(set.status, 0, set.stderr)
+  assert.deepEqual(readJson(file(root, "providers", "r4-coder", "models.json"))["deepseek-v4.1-flash"], {
+    name: "DS",
+    limit: { context: 1000, output: 100 },
+  })
+
+  const bad = cli(["set-model", "--provider", "r4-coder", "--key", "deepseek-v4.1-flash", "--unset", "nope"], root)
+  assert.equal(bad.status, 1)
+  assert.match(bad.stderr, /--unset nope 不支持/)
+})
+
+test("set-provider：改名 / --unset baseurl（未传字段保持原样）", () => {
+  const root = freshRoot()
+  const set = cli(["set-provider", "--id", "r4-coder", "--name", "R4 Renamed", "--unset", "baseurl"], root)
+  assert.equal(set.status, 0, set.stderr)
+  const provider = readJson(file(root, "providers", "r4-coder", "provider.json"))
+  assert.equal(provider.name, "R4 Renamed")
+  assert.equal(provider.package, "@opencode/ai/providers/openai-compatible")
+  assert.equal("baseURL" in provider, false)
+})
+
+test("set-shared-model：补丁只改传入字段，并提示引用方", () => {
+  const root = freshRoot()
+  const set = cli(["set-shared-model", "--lab", "deepseek", "--key", "deepseek-v4.1-flash", "--context", "123", "--output", "45"], root)
+  assert.equal(set.status, 0, set.stderr)
+  assert.match(set.stdout, /改动对引用它的供应商同时生效/)
+  const model = readJson(file(root, "models", "deepseek", "deepseek-v4.1-flash.json"))
+  assert.deepEqual(model.limit, { context: 123, output: 45 })
+  assert.equal(model.name, "Deepseek V4.1 Flash")
+})
+
+test("remove-model：拒绝删唯一模型；可删多模型之一", () => {
+  const root = freshRoot()
+  const only = cli(["remove-model", "--provider", "r4-coder", "--key", "deepseek-v4.1-flash"], root)
+  assert.equal(only.status, 1)
+  assert.match(only.stderr, /唯一的模型/)
+
+  assert.equal(cli(["add-model", "--provider", "r4-coder", "--key", "extra", "--context", "1", "--output", "1"], root).status, 0)
+  const removed = cli(["remove-model", "--provider", "r4-coder", "--key", "extra"], root)
+  assert.equal(removed.status, 0, removed.stderr)
+  assert.equal("extra" in readJson(file(root, "providers", "r4-coder", "models.json")), false)
+})
+
+test("remove-provider：删目录 + 从 index 移除；拒绝删唯一供应商", () => {
+  const root = freshRoot()
+  const removed = cli(["remove-provider", "--id", "r4-coder"], root)
+  assert.equal(removed.status, 0, removed.stderr)
+  assert.equal(existsSync(file(root, "providers", "r4-coder")), false)
+  assert.deepEqual(readJson(file(root, "index.json")).providers, ["command-code", "open-design"])
+  assert.equal(cli(["validate"], root).status, 0)
+
+  assert.equal(cli(["remove-provider", "--id", "command-code"], root).status, 0)
+  const last = cli(["remove-provider", "--id", "open-design"], root)
+  assert.equal(last.status, 1)
+  assert.match(last.stderr, /唯一的供应商/)
+})
+
+test("remove-shared-model：仍被引用则拒绝；无人引用才删并清理空 lab 目录", () => {
+  const root = freshRoot()
+  const refused = cli(["remove-shared-model", "--ref", "deepseek/deepseek-v4.1-flash"], root)
+  assert.equal(refused.status, 1)
+  assert.match(refused.stderr, /仍被引用/)
+
+  assert.equal(cli(["add-shared-model", "--lab", "solo", "--key", "only", "--context", "1", "--output", "1"], root).status, 0)
+  const removed = cli(["remove-shared-model", "--ref", "solo/only"], root)
+  assert.equal(removed.status, 0, removed.stderr)
+  assert.equal(existsSync(file(root, "models", "solo")), false)
+})
+
+test("软提示：内联参数与某共享模型相同 → 提示可用 --base 复用", () => {
+  const root = freshRoot()
+  const result = cli(
+    [
+      "add-model", "--provider", "r4-coder", "--key", "ds-copy",
+      "--model-name", "Deepseek V4.1 Flash", "--context", "1048576", "--output", "393216",
+      "--input", "text,image",
+      "--variant", 'low:{"reasoningEffort":"low"}',
+      "--variant", 'high:{"reasoningEffort":"high"}',
+      "--variant", 'max:{"reasoningEffort":"max"}',
+    ],
+    root,
+  )
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /可改用 --base deepseek\/deepseek-v4\.1-flash 复用/)
+})
+
+test("复用共享模型：add-provider --base 只写 base/modelID（不重复 limit）", () => {
+  const root = freshRoot()
+  const result = cli(
+    [
+      "add-provider", "--id", "reuse", "--name", "Reuse", "--baseurl", "https://api.reuse.example/v1",
+      "--model", "deepseek-v4.1-flash", "--base", "deepseek/deepseek-v4.1-flash",
+      "--model-id", "deepseek/deepseek-v4.1-flash",
+    ],
+    root,
+  )
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(readJson(file(root, "providers", "reuse", "models.json")), {
+    "deepseek-v4.1-flash": { base: "deepseek/deepseek-v4.1-flash", modelID: "deepseek/deepseek-v4.1-flash" },
+  })
+  assert.equal(cli(["validate"], root).status, 0)
+})
