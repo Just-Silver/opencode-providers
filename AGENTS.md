@@ -146,6 +146,9 @@
 - `.opencode/skills/` **不是**插件发现根（发现器只扫 `<config>/plugin`、`<config>/plugins`），放在这里安全。
 - 改这个技能要先做**基线对比测试**（无技能跑一遍看偏差 → 写/改技能 → 有技能再跑一遍），
   已实测的偏差是「自行加 `keyLabel`、把参数硬抽到顶层 `models` + `base`」。
+  **2026-10-07 复测（新增 / 改 / 删 / 复用共享模型）**：无技能基线会直接 `Read` 全部 `registry/**`（`index.json` + 各 `providers/*` + `models/*`）、
+  手改 JSON 并自己推算 `revision`；有技能时 **0 直读、全程走 CLI**（连「改名」也用 `remove-*` + `add-*`）。
+  基线另暴露：CLI 最小字段铁律下「改名」会丢掉 `keyLabel` 等历史字段 → 技能已注明「停下向用户说明、别手改」。
 
 # 文档索引（docs/）
 

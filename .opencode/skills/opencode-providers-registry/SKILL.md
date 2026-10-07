@@ -26,6 +26,10 @@ description: Use when adding or changing providers or models in this repository'
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命令> [参数]
 ```
 
+**红线**：任何时候都不要用 `Read`/`Glob`/`Grep`/`cat`/`Get-Content` 打开 `registry/**`，也不要手改这些 JSON
+（`index.json` 与 `revision` 由 CLI 负责）。若你觉得某个操作 CLI 做不到，**先停下来说明**，改用现有命令组合
+（例：「改名」= `remove-*` + `add-*`），而不是绕过 CLI 手改文件。
+
 | 子命令 | 作用 |
 |---|---|
 | `list [--json]` | 枚举所有供应商 + 各自模型 + **顶层共享模型**（含未被引用的） |
@@ -52,8 +56,9 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 - 输出里「**顶层共享模型**」一节就是可复用候选（= `registry/models/<lab>/<model>.json`）。
 - **命中 → 路线 C**：用 `question` 让用户确认复用哪一个（选项 = 命中项、推荐置顶），选中即 `add-*/--base <lab>/<model>`，
   **不再问 limit / 名称 / 变体 / 输入模态**（都来自共享模型；只有上游 id 不同才用 `--model-id` 覆盖）。
-- **命中内联模型**（只写在某家 `providers/<id>/models.json`、没进 `models/`）→ `--base` 用不了：先 `add-shared-model`
-  提升为共享模型，再 `--base`（可顺手把源 provider 也改成 `base`，免得留重复定义）。
+- **命中内联模型**（只写在某家 `providers/<id>/models.json`、没进 `models/`）→ `--base` 用不了，先提升为共享再引用：
+  `show <id> <key>` 拿到参数 → `add-shared-model`（照抄那些参数）→ 给新家 `add-*/--base <lab>/<model>`；
+  想顺手把**源** provider 也改成引用，用 `set-model --provider <id> --key <key> --base <lab>/<model> --unset name,limit,variants,input`（清掉内联重复字段）。
 - **没命中 → 路线 A/B**，照下面的问题模板逐项问。
 - **绝不自动加 `--base`**：复用与否由用户在提问里点选，技能不拿默认值替用户决定。
 
@@ -75,6 +80,9 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 - `remove-model`：不许删某家**最后一个**模型（会变空，schema 不允许）→ 要删整家用 `remove-provider`。
 - `remove-provider`：不许删注册表里**最后一个**供应商。
 - `remove-shared-model`：**仍被 `base` 引用就拒绝**（悬空引用会让那家在插件里被整家跳过）；先 `set-model --unset base`（或 `remove-model`）解除引用再删。
+
+> 没有独立的「改名」命令：改名 = `remove-*` + `add-*`。注意**只保留 CLI 能表达的字段**（name/package/baseURL/models/模型的 `base` 等）；
+> `keyLabel` 之类历史遗留字段会随旧条目消失——遇到就**向用户说明**，别手改 JSON 补回。
 
 不在本技能范围：改插件代码 / 加 `env` 认证。
 
