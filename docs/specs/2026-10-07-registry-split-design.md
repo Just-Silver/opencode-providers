@@ -177,9 +177,11 @@ export const registryRpc = {
 
 TUI（`view/connect.ts`）：
 
-- `/connect-providers` 首个选择弹窗的 `DialogSelectOptions.actions` 增加：
+- `/connect-providers` 首个选择弹窗加一个 footer 动作：
   `{ title: "Force refresh", bind: "mod+r", selection: "none", onTrigger: () => forceRefresh(ctx) }`。
-  （该 API 的动作**同时**是 footer 动作与快捷键，无需二选一。）
+  它被渲染成弹窗底部**一行可点击的「按钮」**，同时带快捷键——三种触发方式跑同一个 `onTrigger`：
+  ① 鼠标点该行；② `Tab` 聚焦到该行后回车；③ 直接按 `mod+r`。
+  （证据：`packages/tui/src/ui/dialog-select.tsx` 的 `FooterAction` 渲染 `title`+键位并 `onMouseUp` 触发。）
 - `forceRefresh(ctx)`：`ctx.client.rpc(registryRpc).refresh({})` → `toast` 结果 → `ctx.data.location.integration.invalidate(ctx.location)`（连带 provider/model）刷新列表。
 - 空态（当前无本插件供应商）：仍展示该动作，让用户能「先刷新再连」。
 
