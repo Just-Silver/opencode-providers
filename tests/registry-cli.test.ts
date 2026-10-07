@@ -43,6 +43,19 @@ function snapshot(root: string): Record<string, string> {
   return Object.fromEntries(walk(root).map((rel) => [rel, readFileSync(file(root, ...rel.split("/")), "utf8")]))
 }
 
+/** 从注册表目录推导 validate 的汇总计数，新增供应商/模型不需要改测试。 */
+function registryCounts(root: string) {
+  const providerIds = readdirSync(file(root, "providers"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+  const models = providerIds.reduce(
+    (total, id) => total + Object.keys(readJson(file(root, "providers", id, "models.json"))).length,
+    0,
+  )
+  const shared = walk(file(root, "models")).filter((rel) => rel.endsWith(".json")).length
+  return { providers: providerIds.length, models, shared }
+}
+
 test("list 打印供应商与模型，不吐整份 JSON", () => {
   const root = freshRoot()
   const result = cli(["list"], root)
@@ -87,13 +100,13 @@ test("add-provider 建分文件、index 追加 id、revision 改变、validate �
   const result = cli(
     [
       "add-provider",
-      "--id", "open-design",
-      "--name", "Open Design",
-      "--baseurl", "https://api.open-design.ai/v1",
+      "--id", "example-prov",
+      "--name", "Example Provider",
+      "--baseurl", "https://api.example-prov.test/v1",
       "--protocol", "chat",
-      "--model", "open-design-chat",
-      "--model-name", "Open Design Chat",
-      "--model-id", "open-design-chat-v1",
+      "--model", "example-chat",
+      "--model-name", "Example Chat",
+      "--model-id", "example-chat-v1",
       "--context", "131072",
       "--output", "32768",
       "--variant", 'low:{"reasoningEffort":"low"}',
@@ -102,22 +115,22 @@ test("add-provider 建分文件、index 追加 id、revision 改变、validate �
   )
   assert.equal(result.status, 0, result.stderr)
 
-  assert.deepEqual(readJson(file(root, "providers", "open-design", "provider.json")), {
-    name: "Open Design",
+  assert.deepEqual(readJson(file(root, "providers", "example-prov", "provider.json")), {
+    name: "Example Provider",
     package: "@opencode/ai/providers/openai-compatible",
-    baseURL: "https://api.open-design.ai/v1",
+    baseURL: "https://api.example-prov.test/v1",
   })
-  assert.deepEqual(readJson(file(root, "providers", "open-design", "models.json")), {
-    "open-design-chat": {
-      name: "Open Design Chat",
-      modelID: "open-design-chat-v1",
+  assert.deepEqual(readJson(file(root, "providers", "example-prov", "models.json")), {
+    "example-chat": {
+      name: "Example Chat",
+      modelID: "example-chat-v1",
       limit: { context: 131072, output: 32768 },
       variants: [{ id: "low", settings: { reasoningEffort: "low" } }],
     },
   })
 
   const after = readJson(file(root, "index.json"))
-  assert.deepEqual(after.providers, ["command-code", "open-design", "r4-coder"])
+  assert.deepEqual(after.providers, [...before.providers, "example-prov"].sort())
   assert.notEqual(after.revision, before.revision)
   const validate = cli(["validate"], root)
   assert.equal(validate.status, 0, validate.stderr)
@@ -253,7 +266,11 @@ test("validate 汇总计数；子文件损坏报错", () => {
   cli(["sync"], root)
   const ok = cli(["validate"], root)
   assert.equal(ok.status, 0, ok.stderr)
-  assert.match(ok.stdout, /供应商=2 · 模型=2 · 顶层共享模型=1/)
+  const counts = registryCounts(root)
+  assert.match(
+    ok.stdout,
+    new RegExp(`供应商=${counts.providers} · 模型=${counts.models} · 顶层共享模型=${counts.shared}`),
+  )
 
   const broken = freshRoot()
   writeFileSync(file(broken, "providers", "r4-coder", "models.json"), "{ broken")

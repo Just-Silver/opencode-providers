@@ -1,8 +1,9 @@
 {
   "schemaVersion": 1,
-  "revision": "sha256:6aba1ad9c69d61d441d25856687978b8591d3b2708c7ea08d00342b333699ab7",
+  "revision": "sha256:3c96b04f7dd0b073b52d124c4c38727b3dad81e7581570db42cef15736d6688d",
   "providers": [
     "command-code",
+    "open-design",
     "r4-coder"
   ]
 }

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { test } from "node:test"
 
 import plugin from "../plugin/opencode-providers/index.ts"
@@ -10,19 +10,47 @@ import { DEFAULT_REGISTRY_URL } from "../plugin/opencode-providers/registry/sour
  * integration.update / method.update / provider.add 的入参形状，以及 RPC 强制刷新。
  * （真机上这一步还会被 `opencode.json` 里的同名 provider 盖住，见
  * docs/opencode-plugin-provider-no-config.md 的「撞名」一节，所以这里单独钉。）
+ *
+ * 期望值一律**从随仓注册表动态推导**（供应商 id、模型数、取数次数），所以新增供应商/模型
+ * 不需要改这个测试文件——它只钉「拉到什么就注册什么」。
  */
 
 const registryRoot = new URL("../registry/", import.meta.url)
-const readReg = (rel: string) => readFileSync(new URL(rel, registryRoot), "utf8")
 
-const REGISTRY_TREE: Record<string, string> = {
-  "index.json": readReg("index.json"),
-  "providers/command-code/provider.json": readReg("providers/command-code/provider.json"),
-  "providers/command-code/models.json": readReg("providers/command-code/models.json"),
-  "providers/r4-coder/provider.json": readReg("providers/r4-coder/provider.json"),
-  "providers/r4-coder/models.json": readReg("providers/r4-coder/models.json"),
-  "models/deepseek/deepseek-v4.1-flash.json": readReg("models/deepseek/deepseek-v4.1-flash.json"),
+/** 递归收集注册表目录下所有文件：相对 posix 路径 → 内容。 */
+function readRegistryTree(): Record<string, string> {
+  const out: Record<string, string> = {}
+  const walk = (dir: URL, prefix: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.isDirectory()) walk(new URL(`${entry.name}/`, dir), `${prefix}${entry.name}/`)
+      else out[`${prefix}${entry.name}`] = readFileSync(new URL(entry.name, dir), "utf8")
+    }
+  }
+  walk(registryRoot, "")
+  return out
 }
+
+const REGISTRY_TREE = readRegistryTree()
+
+/** 注册表里全部供应商 id（按 providers/<id>/provider.json 推导，已排序）。 */
+const PROVIDER_IDS: readonly string[] = Object.keys(REGISTRY_TREE)
+  .filter((rel) => /^providers\/[^/]+\/provider\.json$/.test(rel))
+  .map((rel) => rel.split("/")[1]!)
+  .sort()
+
+const modelsOf = (id: string): Record<string, { base?: unknown }> =>
+  JSON.parse(REGISTRY_TREE[`providers/${id}/models.json`]!) as Record<string, { base?: unknown }>
+
+const MODEL_COUNT = PROVIDER_IDS.reduce((total, id) => total + Object.keys(modelsOf(id)).length, 0)
+
+/** loader 取数次数 = manifest(1) + 每家 provider.json/models.json(2) + 被 base 引用的共享模型。 */
+const SHARED_BASES = new Set<string>()
+for (const id of PROVIDER_IDS) {
+  for (const spec of Object.values(modelsOf(id))) {
+    if (typeof spec.base === "string" && spec.base) SHARED_BASES.add(spec.base)
+  }
+}
+const EXPECTED_FETCHES = 1 + PROVIDER_IDS.length * 2 + SHARED_BASES.size
 
 /** Serves a registry tree keyed by manifest-relative path; missing keys are 404. */
 function treeFetch(tree: Record<string, string>, manifestUrl: string = DEFAULT_REGISTRY_URL) {
@@ -112,10 +140,13 @@ test("server 入口用随仓注册表注册 integration（带 metadata.source / 
   const state = fakeContext()
   await withFetch(treeFetch(REGISTRY_TREE).fetch, () => plugin.setup(state.ctx))
 
-  assert.deepEqual([...state.integrations.keys()].sort(), ["command-code", "r4-coder"])
+  assert.deepEqual([...state.integrations.keys()].sort(), PROVIDER_IDS)
+  for (const id of PROVIDER_IDS) {
+    assert.equal(state.integrations.get(id)!.metadata?.source, "opencode-providers")
+  }
+
   const commandCode = state.integrations.get("command-code")!
   assert.equal(commandCode.name, "Command Code")
-  assert.equal(commandCode.metadata?.source, "opencode-providers")
   assert.equal(commandCode.metadata?.keyLabel, "Paste Command Code API key")
 
   const byIntegration = new Map(state.methods.map((entry) => [entry.integrationID, entry.method]))
@@ -127,8 +158,16 @@ test("server 入口注册 provider：activation auto + integrationID 对齐 + �
   const state = fakeContext()
   await withFetch(treeFetch(REGISTRY_TREE).fetch, () => plugin.setup(state.ctx))
 
-  assert.equal(state.providers.length, 2)
+  assert.equal(state.providers.length, PROVIDER_IDS.length)
   const providers = new Map(state.providers.map((entry) => [entry.info.id as string, entry]))
+
+  // 逐家通用契约：activation auto、integrationID 自对齐、至少一个模型。
+  for (const id of PROVIDER_IDS) {
+    const entry = providers.get(id)!
+    assert.equal(entry.info.activation, "auto")
+    assert.equal(entry.info.integrationID, id)
+    assert.ok(entry.models.length > 0, `${id} 应至少注册一个模型`)
+  }
 
   const commandCode = providers.get("command-code")!
   assert.equal(commandCode.info.activation, "auto")
@@ -169,18 +208,18 @@ test("M3：宿主没有 ctx.rpc 时 setup 仍照常注册（刷新不可用不�
   const state = fakeContext()
   delete state.ctx.rpc
   await withFetch(treeFetch(REGISTRY_TREE).fetch, () => plugin.setup(state.ctx))
-  assert.deepEqual([...state.integrations.keys()].sort(), ["command-code", "r4-coder"])
-  assert.equal(state.providers.length, 2)
+  assert.deepEqual([...state.integrations.keys()].sort(), PROVIDER_IDS)
+  assert.equal(state.providers.length, PROVIDER_IDS.length)
 })
 
-test("缓存按 URL 隔离：首次 6 次取数（manifest + 2 家 + 共享），第二次命中缓存 +0", async () => {
+test(`缓存按 URL 隔离：首次 ${EXPECTED_FETCHES} 次取数，第二次命中缓存 +0`, async () => {
   const state = fakeContext()
   const { fetch, calls } = treeFetch(REGISTRY_TREE)
   await withFetch(fetch, async () => {
     await plugin.setup(state.ctx)
-    assert.equal(calls.length, 6)
+    assert.equal(calls.length, EXPECTED_FETCHES)
     await plugin.setup(state.ctx)
-    assert.equal(calls.length, 6, "第二次应命中缓存（TTL 内），不再打网络")
+    assert.equal(calls.length, EXPECTED_FETCHES, "第二次应命中缓存（TTL 内），不再打网络")
   })
   assert.equal(state.storage.size, 1)
   const key = [...state.storage.keys()][0]!
@@ -198,7 +237,7 @@ test("options.registryUrl 可换注册表地址：拉取它、且缓存键含该
   assert.equal(calls[0], custom)
   assert.ok(calls.every((url) => url.startsWith("https://registry.example.test/")))
   assert.deepEqual([...state.storage.keys()], [`registry-cache:${custom}`])
-  assert.deepEqual([...state.integrations.keys()].sort(), ["command-code", "r4-coder"])
+  assert.deepEqual([...state.integrations.keys()].sort(), PROVIDER_IDS)
 })
 
 test("rpc refresh：revision 未变 → ok:true、reload 各 1 次、只请求 manifest", async () => {
@@ -209,8 +248,8 @@ test("rpc refresh：revision 未变 → ok:true、reload 各 1 次、只请求 m
     const before = calls.length
     const result = (await state.registered.handlers!.refresh!({}, {})) as any
     assert.equal(result.ok, true)
-    assert.equal(result.providers, 2)
-    assert.equal(result.models, 2)
+    assert.equal(result.providers, PROVIDER_IDS.length)
+    assert.equal(result.models, MODEL_COUNT)
     assert.equal(calls.length, before + 1, "revision 未变 → 只重新请求 manifest")
   })
   assert.equal(state.reloads.integration, 1)
@@ -220,7 +259,7 @@ test("rpc refresh：revision 未变 → ok:true、reload 各 1 次、只请求 m
 test("rpc refresh：上游不可达（有缓存 → stale）→ ok:false、不动 state、不 reload（RF4）", async () => {
   const state = fakeContext()
   await withFetch(treeFetch(REGISTRY_TREE).fetch, () => plugin.setup(state.ctx))
-  assert.equal(state.providers.length, 2)
+  assert.equal(state.providers.length, PROVIDER_IDS.length)
 
   const offline = (async () => new Response("nope", { status: 404, statusText: "Not Found" })) as typeof fetch
   const result = (await withFetch(offline, async () =>
@@ -231,5 +270,5 @@ test("rpc refresh：上游不可达（有缓存 → stale）→ ok:false、不�
   assert.match((result.errors ?? []).join("\n"), /refresh failed|cached/)
   assert.equal(state.reloads.integration, 0)
   assert.equal(state.reloads.provider, 0)
-  assert.equal(state.providers.length, 2, "旧注册结果不应被清空")
+  assert.equal(state.providers.length, PROVIDER_IDS.length, "旧注册结果不应被清空")
 })
