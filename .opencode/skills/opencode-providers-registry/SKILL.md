@@ -347,3 +347,4 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 | 变体不生效 | `settings` 必须在 `variants[].settings`，不是模型级 `settings` |
 | CLI 报「供应商已存在」/「已存在模型」 | 说明该走路由 B 或换 key；CLI 不做覆盖/改名，别手改 JSON 绕过 |
 | CLI 报「未通过 schema 校验」 | 参数组合非法（如 `--base` 指向不存在的共享模型）；按提示改参数重跑（写命令落盘前就校验，失败不写文件） |
+| `validate` 报错但运行期照常 | CLI 是**源码级全量严校验**（连没人引用的共享模型也校验），运行期是**逐家宽松**（坏的那家只跳过、其余照常）；按 CLI 提示修好即可 |
