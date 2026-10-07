@@ -35,8 +35,9 @@ export async function connectProviders(ctx: Context): Promise<void> {
       label: { confirm: "Force refresh" },
     })
     if (confirmed) {
-      await forceRefresh(ctx)
-      ctx.ui.toast.show({ variant: "info", message: "Reloaded. Run /connect-providers again to connect a provider." })
+      if (await forceRefresh(ctx)) {
+        ctx.ui.toast.show({ variant: "info", message: "Reloaded. Run /connect-providers again to connect a provider." })
+      }
     }
     return
   }
@@ -51,7 +52,7 @@ export async function connectProviders(ctx: Context): Promise<void> {
     actions: [
       {
         title: "Force refresh",
-        bind: "mod+r",
+        bind: "ctrl+r",
         selection: "none",
         onTrigger: () => void forceRefresh(ctx),
       },
@@ -67,24 +68,27 @@ export async function connectProviders(ctx: Context): Promise<void> {
 
 /**
  * Re-fetch the registry through the server RPC (bypasses the TTL) and refresh the
- * provider list. A failure only surfaces as an error toast: the previously
- * registered providers stay usable, so nothing is invalidated.
+ * provider list. Returns whether it succeeded. A failure only surfaces as an
+ * error toast: the previously registered providers stay usable, so nothing is
+ * invalidated.
  */
-export async function forceRefresh(ctx: Context): Promise<void> {
+export async function forceRefresh(ctx: Context): Promise<boolean> {
   try {
     const result = await ctx.client.rpc(registryRpc).refresh({})
     if (!result.ok) {
       const detail = (result.errors ?? ["unknown error"]).join("; ")
       ctx.ui.toast.show({ variant: "error", message: `Registry refresh failed: ${detail}` })
-      return
+      return false
     }
     ctx.data.location.integration.invalidate(ctx.location)
     ctx.ui.toast.show({
       variant: "success",
       message: `Registry refreshed: ${result.providers ?? 0} providers, ${result.models ?? 0} models`,
     })
+    return true
   } catch (error) {
     ctx.ui.toast.show({ variant: "error", message: message(error) })
+    return false
   }
 }
 

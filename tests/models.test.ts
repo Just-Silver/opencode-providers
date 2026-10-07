@@ -91,6 +91,24 @@ test("buildProviderModels defaults tools to true and modality to text", () => {
   assert.equal(model.compatibility, undefined)
 })
 
+test("显式声明 input: [\"text\"] 时保持纯文本（声明优先，插件不覆盖）", () => {
+  const parsed = parseRegistry({
+    schemaVersion: 1,
+    models: {},
+    providers: {
+      acme: {
+        name: "Acme",
+        package: "pkg",
+        models: { m: { limit: { context: 10, output: 1 }, input: ["text"], tools: false } },
+      },
+    },
+  })
+  assert.equal(parsed.ok, true)
+  if (!parsed.ok) return
+  const [model] = buildProviderModels(parsed.registry, "acme", parsed.registry.providers.acme)
+  assert.deepEqual(model?.capabilities, { tools: false, input: ["text"], output: ["text"] })
+})
+
 test("buildProviderModels honours disabled", () => {
   const parsed = parseRegistry({
     schemaVersion: 1,

@@ -10,7 +10,7 @@ description: Use when adding or changing providers or models in this repository'
 + 顶层共享模型 `registry/models/<lab>/<model>.json`。`index.json` 与 `revision` 由 CLI 自动维护，**人手不碰**。
 插件运行期从 GitHub raw 拉 manifest，按 `revision` 决定要不要重拉各分文件、聚合成一份（6h TTL + `ETag` + 失败沿用旧缓存）。
 **改数据不需要发插件版本**，但要让运行中的实例跟上：`git push origin main` → 触发一次插件重载
-（`install.ps1 -Local` / 重启 / 或在 `/connect-providers` 弹窗里按 `Mod+R` 强制刷新），否则最多等 6h。
+（`install.ps1 -Local` / 重启 / 或在 `/connect-providers` 弹窗里按 `Ctrl+R` 强制刷新），否则最多等 6h。
 
 ## 铁律 0：禁止直接读整份注册表
 
@@ -131,6 +131,18 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
         { "label": "low / high / max", "description": "写入三档 reasoningEffort 变体" },
         { "label": "low / high", "description": "写入两档 reasoningEffort 变体" }
       ]
+    },
+    {
+      "header": "输入模态（可多选）",
+      "question": "这个模型能接收哪些输入模态？（可多选；没有任何多模态能力就只选「纯文本」）",
+      "multiple": true,
+      "options": [
+        { "label": "纯文本 (text)", "description": "文本输入；任何模型都应保留这项" },
+        { "label": "图片 (image)", "description": "仅当上游是视觉/多模态模型才选" },
+        { "label": "音频 (audio)", "description": "上游支持音频输入才选" },
+        { "label": "视频 (video)", "description": "上游支持视频输入才选" },
+        { "label": "PDF (pdf)", "description": "上游支持 PDF 输入才选" }
+      ]
     }
   ]
 }
@@ -185,6 +197,18 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
         { "label": "low / high / max", "description": "写入三档 reasoningEffort 变体" },
         { "label": "low / high", "description": "写入两档 reasoningEffort 变体" }
       ]
+    },
+    {
+      "header": "输入模态（可多选）",
+      "question": "这个模型能接收哪些输入模态？（可多选；没有任何多模态能力就只选「纯文本」）",
+      "multiple": true,
+      "options": [
+        { "label": "纯文本 (text)", "description": "文本输入；任何模型都应保留这项" },
+        { "label": "图片 (image)", "description": "仅当上游是视觉/多模态模型才选" },
+        { "label": "音频 (audio)", "description": "上游支持音频输入才选" },
+        { "label": "视频 (video)", "description": "上游支持视频输入才选" },
+        { "label": "PDF (pdf)", "description": "上游支持 PDF 输入才选" }
+      ]
     }
   ]
 }
@@ -215,7 +239,10 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 要点：
 
 - `limit` 要写就写全：`--context` 与 `--output` 必须同时给；**都没给又没用 `--base` 会直接报错**（参数不猜）。
-- `--model-id` 省略（或等于 key）就不写 `modelID`；`--model-name` 省略就不写 `name`。
+- **能力项必须问过用户再写**：用户选了「图片/音频/…」就用 `--input text,image`（逗号分隔、必须含 `text`）。
+  不写 `--input` 时插件按默认处理（当前默认是纯文本 `["text"]`，即「识别不了图」）——所以要开图片**必须显式写**。
+  工具调用能力**不写**（不在最小配置里，默认继承上游/宿主）。
+- `--model-id` 省略（或等于 key）就不写 `modelID`；`--model-name` 省略就不写 `name`（**不会**拿供应商名顶替）。
 - 模型与某个已存在的**顶层共享模型**参数完全一致时，用 `add-model --base <lab>/<model>` 引用，别复制一份（见下节）。
 - `add-provider` 的 `--baseurl` 若已被别家占用会报错，确属有意才加 `--force`。
 
@@ -225,9 +252,11 @@ CLI **只**接受这些字段并据此写文件，其它一律不给入口：
 
 - provider 级 → `name`、`package`（或 `--protocol`）、`baseURL`、`models`
 - 模型级 → `name`、`modelID`、`limit`（`context`/`output`）、`variants`（`id` + 可选 `settings`）、`base`
+- 模型**能力**（可选，**必须用多选问过用户后再写**）→ `input`（输入模态，逗号分隔、必须含 `text`，如 `["text","image"]`）
 
 **不要** `keyLabel`（默认就是 `Paste API key`）、`settings`、`headers`、`body`、`canonical`、`env`、`apiKey`、
-`cost`、`tools`、`input`、`output`、`family`、`status`、`releaseDate`、`disabled`、`reasoningField`、`maxTokensField`。
+`cost`、`tools`、`family`、`status`、`releaseDate`、`disabled`、`reasoningField`、`maxTokensField`。
+（`input` 是**能力事实**，用上面的多选问出来才写；`tools` 不写，默认继承上游。）
 
 - **绝不写 `env` / `apiKey`**：本项目只走 `/connect`，key 存 opencode 自己的凭据表（写进注册表会明文落盘、且绕过 `/connect`）。
 - 已有条目里若带了上述字段（历史遗留），**不要**顺手加/删，保持最小改动。
@@ -310,7 +339,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 | 现象 | 原因 / 处理 |
 |---|---|
 | 插件 `active` 但注册 0 条 | 注册表不可用：先 `curl` raw `index.json` 是否 200，再 `node … validate` 看是否校验失败 |
-| 改完没生效 | 没 push，或没触发重载（TTL 6h 内沿用缓存；`/connect-providers` 弹窗里按 `Mod+R` 可强制刷新） |
+| 改完没生效 | 没 push，或没触发重载（TTL 6h 内沿用缓存；`/connect-providers` 弹窗里按 `Ctrl+R` 可强制刷新） |
 | `validate` 报 `revision 不一致` | 子文件被手改过；跑一次 `node … sync` 重算 `revision` 再提交 |
 | `/api/model` 里没这家 | 正常：`activation: auto`，要在 `/connect-providers` 里存过 key 才出现 |
 | 和 `opencode.json` 的 `providers.<id>` 撞名 | 同 id **只留一边**；配置那份还会注入 `activation: enabled` 与明文 key |

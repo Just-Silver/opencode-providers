@@ -165,6 +165,14 @@ test("注册表不可用时不注册任何东西，但 setup 不抛（插件仍 
   assert.equal(state.providers.length, 0)
 })
 
+test("M3：宿主没有 ctx.rpc 时 setup 仍照常注册（刷新不可用不应拖垮注册）", async () => {
+  const state = fakeContext()
+  delete state.ctx.rpc
+  await withFetch(treeFetch(REGISTRY_TREE).fetch, () => plugin.setup(state.ctx))
+  assert.deepEqual([...state.integrations.keys()].sort(), ["command-code", "r4-coder"])
+  assert.equal(state.providers.length, 2)
+})
+
 test("缓存按 URL 隔离：首次 6 次取数（manifest + 2 家 + 共享），第二次命中缓存 +0", async () => {
   const state = fakeContext()
   const { fetch, calls } = treeFetch(REGISTRY_TREE)

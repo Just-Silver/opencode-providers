@@ -259,11 +259,12 @@ OpenCode 内部已有两种现成做法，可直接照抄：
 插件通过 `ctx.storage` 读写，宿主机把键加上命名空间前缀 `plugin:<插件 id 每个字符的 utf-16 hex>:`
 （`packages/core/src/plugin/host.ts:602-628`；跨 location 共享，TUI/server 两个进程读同一行）。
 
-- 键名 = `plugin:…:registry-cache:<注册表 URL>` → **每个 URL 一份缓存**；换 URL 等价于无缓存 = 立刻重拉
-  （这是故意设计，见 `plugin/opencode-providers/index.ts:62-63`）
-- 值 = `{ etag, fetchedAt, body }`（`registry/source.ts:19-23`），`body` 是**原始 JSON 文本**（不是解析结果）
+- 键名 = `plugin:…:registry-cache:<manifest URL>` → **每个 URL 一份缓存**；换 URL 等价于无缓存 = 立刻重拉
+  （这是故意设计，见 `plugin/opencode-providers/index.ts` 的 `cacheKey`）
+- 值 = `{ etag?, revision?, fetchedAt, body }`（`registry/source.ts`），`body` 是**聚合后**的
+  `{schemaVersion, models, providers}` JSON 文本（不是某个子文件）
 
-**TTL = 6 小时**（`registry/source.ts:16` `DEFAULT_TTL_MS = 6 * 60 * 60 * 1000`；HTTP 超时 10s `:17`）。
+**TTL = 6 小时**（`registry/source.ts` 的 `DEFAULT_TTL_MS = 6 * 60 * 60 * 1000`；HTTP 超时 10s）。
 
 > **关键：没有后台定时器。** `loadRegistry()` 只在插件 `setup()` 时执行一次 —— 所谓"重拉"发生在**插件被(重新)加载**
 > 的时刻：opencode 启动、插件安装/换版本、配置变化（文件监视热重载）、显式重启服务。
@@ -288,20 +289,26 @@ integration，见 `view/connect.ts:113-117`），CLI/其它客户端同理 —�
 | 条件 | 结果 |
 |---|---|
 | ① 没有缓存（首次安装 / 换 URL / 手工删了那行） | 走网络 |
-| ② 缓存 `fetchedAt` 距今 ≥ 6h | 走网络 |
+| ② 缓存 `fetchedAt` 距今 ≥ 6h，或 `force: true`（强制刷新） | 走网络 |
 | ③ 缓存 body 解析失败（JSON 坏 / `schemaVersion` 不匹配或字段不合法） | 走网络（别用坏数据） |
 | ④ 缓存新鲜 | **零网络**，直接用（`source: "cache"`） |
 
-网络请求的结果分支（都实测过）：
+网络请求的结果分支（源是分文件 + manifest，见「源结构」）：
 
-- `200` → 写新 `etag`+`fetchedAt`+`body`，`source: "network"`；
-- `304` → 用缓存 body，但**顺延 `fetchedAt` 再管 6h**（所以服务端没改内容时永不重下）
+- 先抓 **manifest**（`index.json`，带 `If-None-Match`）。**稳态只发这 1 次请求**——`revision` 没变就不碰子文件。
+- `200` → 按 `revision` 决定是否拉子文件：
+  - `revision` 与缓存一致 → 不重拉子文件，只顺延 `fetchedAt`（`source: "cache"`）。
+  - `revision` 变了 → 并发拉 `providers/<id>/{provider,models}.json` + 被引用的 `models/<lab>/<model>.json`，
+    **逐家校验**后聚合：某家拉取/JSON/字段非法（或 `base` 指向不存在的共享模型）→ **只跳过该家**并计入 `warnings`，
+    其余照常；成功则写新 `etag`+`revision`+`fetchedAt`+`body`（`source: "network"`）。
+  - 但缓存 body 已损坏时，哪怕 `revision` 一致也要重建（不能拿坏数据当缓存）。
+- `304` → 用缓存 body 并**顺延 `fetchedAt` 再管 6h**；若缓存 body 已损坏，则再发一次**无条件 GET** 取回 manifest 后重建。
 - 非 2xx / 超时 / 网络错误 → **沿用旧缓存**（`source: "stale-cache"`，并 warn 一句）；**一条缓存都没有**时 setup
-  只 `console.error` 后 `return` → 插件 `active` 但注册 **0 条**（见上文）
-- 200 但 body 解析失败 → 同上先试旧缓存
+  只 `console.error` 后 `return` → 插件 `active` 但注册 **0 条**（见上文）。
 
-**想立刻重拉**（不等 6h/不重启）任选其一：重启 `opencode service restart`；把 `registryUrl` 换成新地址（键不同）；
-或直接删掉对应 kv 行。**注意注册表数据改动本身是 URL 不变的**，所以不会自动跳过 TTL。
+**想立刻重拉**（不等 6h、不重启）任选其一：在 `/connect-providers` 弹窗里按 `ctrl+r`（**Force refresh**，经 server RPC
+绕过 TTL 并 `provider`/`integration.reload()`；上游不可达时保留原列表并报错）；`opencode service restart`；
+把 `registryUrl` 换成新地址（键不同）；或直接删掉对应 kv 行。
 
 **观测**：`console.*` 不进日志（上文），直接读 DB 最准（Node ≥ 22.5 自带 `node:sqlite`，只读打开）：
 
@@ -498,7 +505,7 @@ opencode api delete /api/credential/<cred_id>   # 用完清理
 2. 优先用**配置 options**（不改源码）：把已安装副本的配置写成
    `"plugins": [{ "package": "@justsilver/opencode-providers", "options": { "registryUrl": "http://127.0.0.1:<port>/index.json" } }]`；
    或者只改已安装副本 `registry/source.ts` 的 `DEFAULT_REGISTRY_URL` → `http://127.0.0.1:<port>/index.json`
-   （缓存键含 URL，所以等价于强制重新拉取，不必等 6h TTL；`/connect-providers` 里按 `mod+r` 也能强制）；
+   （缓存键含 URL，所以等价于强制重新拉取，不必等 6h TTL；`/connect-providers` 里按 `ctrl+r` 也能强制）；
 3. 等文件监视热重载，然后断言：
    - `/api/integration` 里出现 `probe-check`，且 `metadata.source`、`keyLabel`、`methods` 的 key 标签**都是注册表里的值**；
    - 无凭据时该 provider 在 `/api/model` 里 **0 条**（`activation: auto` 生效）；

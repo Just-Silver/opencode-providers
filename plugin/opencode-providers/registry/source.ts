@@ -21,7 +21,7 @@ export const DEFAULT_REGISTRY_URL =
   "https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry/index.json"
 
 /** Successful checks are trusted for 6h; a failed refresh keeps serving the cached copy. */
-export const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000
+const DEFAULT_TTL_MS = 6 * 60 * 60 * 1000
 const DEFAULT_TIMEOUT_MS = 10_000
 
 export interface RegistryCacheEntry {
@@ -222,7 +222,7 @@ async function staleFallback(
   if (cached === undefined) return undefined
   const parsed = parseBody(cached.body)
   if (!parsed.ok) return undefined
-  return { ok: true, registry: parsed.registry, source: "stale-cache", fetchedAt: cached.fetchedAt, warnings: [] }
+  return { ok: true, registry: parsed.registry, source: "stale-cache", fetchedAt: cached.fetchedAt, warnings: [...errors] }
 }
 
 function errorMessage(error: unknown): string {

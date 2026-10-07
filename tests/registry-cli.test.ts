@@ -223,7 +223,7 @@ test("格式化幂等：sync 两次文件字节不变", () => {
 
 test("validate 汇总计数；子文件损坏报错", () => {
   const root = freshRoot()
-  assert.equal(cli(["sync"], root).status, 0)
+  cli(["sync"], root)
   const ok = cli(["validate"], root)
   assert.equal(ok.status, 0, ok.stderr)
   assert.match(ok.stdout, /供应商=2 · 模型=2 · 顶层共享模型=1/)
@@ -233,4 +233,66 @@ test("validate 汇总计数；子文件损坏报错", () => {
   const bad = cli(["validate"], broken)
   assert.equal(bad.status, 1)
   assert.match(bad.stderr, /校验失败/)
+})
+
+test("B1：同一内容 CRLF 与 LF 的 revision 相同（换行归一）", () => {
+  const rel = ["providers", "r4-coder", "models.json"]
+  const lfRoot = freshRoot()
+  const crlfRoot = freshRoot()
+  const lf = readFileSync(file(lfRoot, ...rel), "utf8").replace(/\r\n/g, "\n")
+  writeFileSync(file(lfRoot, ...rel), lf)
+  writeFileSync(file(crlfRoot, ...rel), lf.replace(/\n/g, "\r\n"))
+
+  assert.equal(cli(["sync"], lfRoot).status, 0)
+  assert.equal(cli(["sync"], crlfRoot).status, 0)
+  assert.equal(readJson(file(crlfRoot, "index.json")).revision, readJson(file(lfRoot, "index.json")).revision)
+  // 且两边都能通过校验（跨平台一致）
+  assert.equal(cli(["validate"], crlfRoot).status, 0)
+  assert.equal(cli(["validate"], lfRoot).status, 0)
+})
+
+test("I1：单段字段不许含 /；--base 恰好两段", () => {
+  const root = freshRoot()
+  const badId = cli(["add-provider", "--id", "a/b", "--name", "X", "--model", "m", "--context", "1", "--output", "1"], root)
+  assert.equal(badId.status, 1)
+  assert.match(badId.stderr, /非法/)
+
+  const badLab = cli(["add-shared-model", "--lab", "a/b", "--key", "m", "--context", "1", "--output", "1"], root)
+  assert.equal(badLab.status, 1)
+  assert.match(badLab.stderr, /非法/)
+
+  const badBase = cli(["add-model", "--provider", "r4-coder", "--key", "m", "--base", "a/b/c"], root)
+  assert.equal(badBase.status, 1)
+  assert.match(badBase.stderr, /非法/)
+
+  // 未产出坏树
+  assert.equal(cli(["validate"], root).status, 0)
+})
+
+test("I2：add-provider 未给 --model-name 时不把供应商名当模型名", () => {
+  const root = freshRoot()
+  const result = cli(
+    ["add-provider", "--id", "newprov", "--name", "New Provider", "--model", "m", "--context", "1", "--output", "1"],
+    root,
+  )
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal("name" in readJson(file(root, "providers", "newprov", "models.json")).m, false)
+})
+
+test("能力多选：--input 写 input 模态", () => {
+  const root = freshRoot()
+  const result = cli(
+    [
+      "add-provider",
+      "--id", "vision", "--name", "Vision", "--model", "v1",
+      "--context", "1000", "--output", "100",
+      "--input", "text,image",
+    ],
+    root,
+  )
+  assert.equal(result.status, 0, result.stderr)
+  const spec = readJson(file(root, "providers", "vision", "models.json")).v1
+  assert.deepEqual(spec.input, ["text", "image"])
+  assert.equal("tools" in spec, false, "tools 不属于最小配置，不应写入")
+  assert.equal(cli(["validate"], root).status, 0)
 })

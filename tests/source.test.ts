@@ -234,3 +234,12 @@ test("⑬ store 损坏不致命", async () => {
   assert.equal(result.ok, true)
   if (result.ok) assert.equal(result.source, "network")
 })
+
+test("⑭ manifest 返回 500 且有合法缓存 → stale-cache（评审 M5）", async () => {
+  const cache = memoryStore({ revision: REV1, fetchedAt: NOW - 10_000_000, body: BODY1 })
+  const fetch = (async () =>
+    new Response("boom", { status: 500, statusText: "Server Error" })) as unknown as typeof globalThis.fetch
+  const result = await loadRegistry({ store: cache.store, fetch, url: MANIFEST_URL, now: () => NOW, ttlMs: TTL })
+  assert.equal(result.ok, true)
+  if (result.ok) assert.equal(result.source, "stale-cache")
+})

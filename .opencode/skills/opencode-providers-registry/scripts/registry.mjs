@@ -19,8 +19,8 @@
  *   node scripts/registry.mjs add-provider --id ID --name 名称 --baseurl URL [--protocol chat] \
  *        --model KEY [--model-name 名称] [--model-id 上游id] [--context N --output N] [--variant id] [--base lab/model] [--force]
  *   node scripts/registry.mjs add-model --provider ID --key KEY [--model-name 名称] [--model-id 上游id] \
- *        [--context N --output N] [--variant id[:settingsJSON]] [--base lab/model]
- *   node scripts/registry.mjs add-shared-model --lab LAB --key KEY [--model-name 名称] [--context N --output N] [--variant id[:settingsJSON]]
+ *        [--context N --output N] [--variant id[:settingsJSON]] [--base lab/model] [--input text,image,...]
+ *   node scripts/registry.mjs add-shared-model --lab LAB --key KEY [--model-name 名称] [--context N --output N] [--variant id[:settingsJSON]] [--input text,image,...]
  *
  * 通用：`--root <注册表目录>` 覆盖默认位置；`--json` 输出机器可读结果。
  * 只允许最小字段（供应商：name/package/baseURL；模型：name/modelID/limit/variants/base），
@@ -117,10 +117,12 @@ function checkId(value, label) {
   return value
 }
 
-/** 路径引用（`lab/model`、`lab`、`id`）逐段套 ID_PATTERN——整串套会把合法的 `/` 误判。 */
-function checkSegments(value, label) {
+/** `base` 引用：必须恰好两段 `lab/model`，每段过 ID_PATTERN。 */
+function checkBaseRef(value) {
   const text = String(value)
-  for (const segment of text.split("/")) checkId(segment, label)
+  const segments = text.split("/")
+  if (segments.length !== 2) throw new CliError(`--base "${text}" 非法：必须恰好是 <lab>/<model> 两段`)
+  for (const segment of segments) checkId(segment, "--base")
   return text
 }
 
@@ -195,7 +197,8 @@ function computeRevision(root) {
   for (const rel of files) {
     hash.update(rel)
     hash.update("\0")
-    hash.update(readFileSync(join(root, ...rel.split("/"))))
+    // 归一换行：CRLF 与 LF 必须哈希一致，否则 Windows 检出（core.autocrlf）会算出与 CI（LF）不同的 revision。
+    hash.update(readFileSync(join(root, ...rel.split("/")), "utf8").replace(/\r\n/g, "\n"))
     hash.update("\0")
   }
   return `sha256:${hash.digest("hex")}`
@@ -259,7 +262,7 @@ function parseTree(tree) {
 }
 
 function requireShared(tree, base) {
-  checkSegments(base, "--base")
+  checkBaseRef(base)
   if (!tree.shared.has(base)) {
     throw new CliError(`--base "${base}" 不在共享模型里（现有：${[...tree.shared.keys()].join(", ") || "无"}）`)
   }
@@ -295,7 +298,7 @@ function buildModelSpec(flags, { key, allowBase }) {
     spec.base = base
   }
 
-  const name = lastOf(flags, "model-name") ?? lastOf(flags, "name")
+  const name = lastOf(flags, "model-name")
   if (typeof name === "string" && name.trim() !== "") spec.name = name
 
   const modelId = lastOf(flags, "model-id")
@@ -317,6 +320,19 @@ function buildModelSpec(flags, { key, allowBase }) {
 
   const variants = parseVariants(allOf(flags, "variant"))
   if (variants) spec.variants = variants
+
+  // 输入模态（可选，由技能多选问出来后显式写入）。不写 = 插件按宿主默认推断；tools 同理默认 true。
+  const input = lastOf(flags, "input")
+  if (typeof input === "string" && input.trim() !== "") {
+    const values = input
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item !== "")
+    if (values.length === 0) throw new CliError(`--input 不能为空`)
+    for (const value of values) checkId(value, "--input 模态")
+    spec.input = values
+  }
+
   return spec
 }
 
@@ -483,7 +499,7 @@ function commandSync(flags) {
 function commandAddProvider(flags) {
   const root = resolveRoot(flags)
   const tree = loadTree(root)
-  const id = checkSegments(required(flags, "id", "供应商 id"), "供应商 id")
+  const id = checkId(required(flags, "id", "供应商 id"), "供应商 id")
   const existing = tree.providers.find((entry) => entry.id === id)
   if (existing) {
     throw new CliError(
@@ -503,7 +519,7 @@ function commandAddProvider(flags) {
     if (clash) throw new CliError(`baseURL "${baseURL}" 已被供应商 "${clash.id}" 使用（加 --force 可强制）`)
   }
 
-  const modelKey = checkSegments(required(flags, "model", "首个模型 key"), "模型 key")
+  const modelKey = checkId(required(flags, "model", "首个模型 key"), "模型 key")
   const base = lastOf(flags, "base")
   if (base !== undefined) requireShared(tree, base)
   const spec = buildModelSpec(flags, { key: modelKey, allowBase: true })
@@ -523,7 +539,7 @@ function commandAddProvider(flags) {
 function commandAddModel(flags) {
   const root = resolveRoot(flags)
   const tree = loadTree(root)
-  const providerId = checkSegments(required(flags, "provider", "供应商 id"), "供应商 id")
+  const providerId = checkId(required(flags, "provider", "供应商 id"), "供应商 id")
   const entry = tree.providers.find((item) => item.id === providerId)
   if (!entry) {
     throw new CliError(
@@ -531,7 +547,7 @@ function commandAddModel(flags) {
         `  新增供应商请用：add-provider --id ${providerId} …`,
     )
   }
-  const key = checkSegments(required(flags, "key", "模型 key"), "模型 key")
+  const key = checkId(required(flags, "key", "模型 key"), "模型 key")
   if (entry.models[key]) {
     throw new CliError(`供应商 "${providerId}" 下已存在模型 "${key}"。本 CLI 不做覆盖/改名，请换 key 或先人工处理`)
   }
@@ -555,8 +571,8 @@ function commandAddModel(flags) {
 function commandAddSharedModel(flags) {
   const root = resolveRoot(flags)
   const tree = loadTree(root)
-  const lab = checkSegments(required(flags, "lab", "lab"), "lab")
-  const key = checkSegments(required(flags, "key", "共享模型 key"), "共享模型 key")
+  const lab = checkId(required(flags, "lab", "lab"), "lab")
+  const key = checkId(required(flags, "key", "共享模型 key"), "共享模型 key")
   const ref = `${lab}/${key}`
   if (tree.shared.has(ref)) throw new CliError(`共享模型 "${ref}" 已存在`)
 
@@ -585,14 +601,17 @@ const USAGE = `分文件注册表维护 CLI —— agent 不要直接读整份�
   node scripts/registry.mjs add-provider --id ID --name 名称 --baseurl URL \\
       [--protocol chat|responses|messages | --package PKG] \\
       --model KEY [--model-name 名称] [--model-id 上游id] \\
-      [--context N --output N] [--variant id[:settingsJSON]] [--base lab/model] [--force]
+      [--context N --output N] [--variant id[:settingsJSON]] [--base lab/model] [--force] \\
+      [--input text,image,...]
 
   node scripts/registry.mjs add-model --provider ID --key KEY \\
       [--model-name 名称] [--model-id 上游id] \\
-      [--context N --output N] [--variant id[:settingsJSON]] [--base lab/model]
+      [--context N --output N] [--variant id[:settingsJSON]] [--base lab/model] \\
+      [--input text,image,...]
 
   node scripts/registry.mjs add-shared-model --lab LAB --key KEY \\
-      [--model-name 名称] [--context N --output N] [--variant id[:settingsJSON]]
+      [--model-name 名称] [--context N --output N] [--variant id[:settingsJSON]] \\
+      [--input text,image,...]
 
 通用：--root <注册表目录>；--json。`
 

@@ -9,13 +9,15 @@
 
 ### Added
 
-- `/connect-providers` 弹窗新增**强制刷新**：footer 动作 + 快捷键 `mod+r`（macOS `Cmd+R`，Windows/Linux `Ctrl+R`），
+- `/connect-providers` 弹窗新增**强制刷新**：footer 动作 + 快捷键 `ctrl+r`（与内置弹窗一致的键位提示），
   经 server RPC（纯 JSON Schema）绕过 6h TTL 重拉注册表并 `provider`/`integration` `reload()`；上游不可达时保留原有列表并报错
 - `tests/setup.test.ts` 新用例：钉住 `ctx.options.registryUrl` —— 配置里把 `plugins` 写成对象条目传 `options` 即可换注册表地址，
   不用改源码（`schema/src/config/plugin.ts` 证明 config 条目支持 `options`）
 
 ### Changed
 
+- 评审修复：`revision` 对 CRLF/LF 归一（Windows 检出与 Linux CI 算出同一个哈希）；路径段校验收紧（单段字段禁 `/`、`base` 必须恰为 `<lab>/<model>`）；`add-provider` 缺 `--model-name` 时不再拿供应商名顶替模型名；`ctx.rpc` 缺失或刷新失败不再拖垮 provider 注册；强制刷新失败不再谎报「已重载」；stale 回落保留 `warnings`
+- 模型**能力**改为技能**多选问出后显式写入**（CLI `--input text,image`）；`tools` 不再写入注册表、默认继承上游
 - **破坏性变更：注册表改为按供应商分文件 + 插件运行期聚合。** 源 = `registry/index.json`（manifest：`schemaVersion`/`revision`/`providers`）
   + `registry/providers/<id>/{provider,models}.json` + 顶层共享模型 `registry/models/<lab>/<model>.json`；插件拉 manifest、按 `revision`
   决定是否重拉子文件，聚合成旧的 `{schemaVersion, models, providers}` 后写 kv（TTL / `ETag` / 失败沿用缓存语义不变）。

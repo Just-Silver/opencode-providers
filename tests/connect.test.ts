@@ -37,7 +37,7 @@ test("forceRefresh 失败：error toast、不 invalidate", async () => {
   assert.equal(seen.toasts[0]?.variant, "error")
 })
 
-test("非空态：dialog.select 收到 'Force refresh' + mod+r 的 action", async () => {
+test("非空态：dialog.select 收到 'Force refresh' + ctrl+r 的 action", async () => {
   let captured: any
   const ctx = {
     location: {},
@@ -60,7 +60,7 @@ test("非空态：dialog.select 收到 'Force refresh' + mod+r 的 action", asyn
   await connectProviders(ctx as any)
   const action = captured.actions.find((item: any) => item.title === "Force refresh")
   assert.ok(action, "应有 Force refresh action")
-  assert.equal(action.bind, "mod+r")
+  assert.equal(action.bind, "ctrl+r")
   assert.equal(action.selection, "none")
 })
 
@@ -81,4 +81,17 @@ test("空态：confirm 确认后触发 forceRefresh（评审 D）", async () => 
   }
   await connectProviders(ctx as any)
   assert.equal(seen.refresh, 1)
+})
+
+test("空态：刷新失败时不谎报「已重载」（评审 M2）", async () => {
+  const toasts: any[] = []
+  const ctx = {
+    location: {},
+    data: { location: { integration: { list: () => [], invalidate: () => {} } } },
+    client: { rpc: () => ({ refresh: async () => ({ ok: false, errors: ["boom"] }) }) },
+    ui: { dialog: { confirm: async () => true }, toast: { show: (o: any) => toasts.push(o) } },
+  }
+  await connectProviders(ctx as any)
+  assert.equal(toasts.filter((toast) => toast.variant === "info").length, 0, "失败不应提示已重载")
+  assert.equal(toasts.filter((toast) => toast.variant === "error").length, 1)
 })

@@ -135,7 +135,7 @@
 # 技能（`.opencode/skills/`）
 
 - `opencode-providers-registry` —— 维护分文件注册表（`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`）：两条路由（新增供应商 / 给已有供应商加模型）、
-  **最小字段铁律**（不写 `keyLabel`/`cost`/`tools`/`env`/`apiKey`…）、协议 → package（`/v1/chat/completions` /
+  **最小字段铁律**（不写 `keyLabel`/`cost`/`tools`/`env`/`apiKey`…；模型**能力** `input` 由技能用多选问出后再写，`tools` 不写、默认继承上游）、协议 → package（`/v1/chat/completions` /
   `/v1/responses` / `/v1/messages` 三种形态）、**一次性用 `question` 收集信息**、改完必须 push + 触发重载 + 验证。
   **agent 禁止直接读整份注册表**（会随供应商/模型增长而变大）：查/改全走随技能 CLI
   `.opencode/skills/opencode-providers-registry/scripts/registry.mjs`

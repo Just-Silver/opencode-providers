@@ -64,7 +64,8 @@ interface SetupContextLike {
     transform(callback: (editor: ProviderEditorLike) => void): Promise<unknown>
     reload(): Promise<unknown>
   }
-  readonly rpc: {
+  /** Absent on hosts/versions without the RPC domain; force refresh then degrades to unavailable. */
+  readonly rpc?: {
     register(
       definition: unknown,
       handlers: Record<string, (input: unknown, context: unknown) => Promise<unknown>>,
@@ -112,7 +113,14 @@ export default {
       }
     }
 
-    await ctx.rpc.register(registryRpc, { refresh })
+    try {
+      await ctx.rpc?.register(registryRpc, { refresh })
+    } catch (error) {
+      // Refresh being unavailable must never block provider registration.
+      console.warn(
+        `[${PLUGIN_ID}] rpc refresh unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
 
     const result = await loadRegistry({ url, fetch: globalThis.fetch, store })
     if (!result.ok) {

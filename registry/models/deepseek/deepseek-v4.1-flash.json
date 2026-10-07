@@ -2,7 +2,6 @@
   "name": "Deepseek V4.1 Flash",
   "family": "deepseek",
   "limit": { "context": 1048576, "output": 393216 },
-  "tools": true,
   "input": ["text","image"],
   "output": ["text"],
   "variants": [

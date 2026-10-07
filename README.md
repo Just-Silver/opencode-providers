@@ -101,7 +101,7 @@ pwsh -NoProfile -File .\install.ps1 -Local
 
 再运行一次可以添加第二个账号，或在已有账号之间切换。
 
-在 `/connect-providers` 弹窗里按 `Mod+R`（macOS 上 `Cmd+R`，Windows/Linux 上 `Ctrl+R`），或点弹窗底部那行 **Force refresh**，
+在 `/connect-providers` 弹窗里按 `Ctrl+R`，或点弹窗底部那行 **Force refresh**，
 即可绕过 6h TTL 立刻重拉注册表并重注册（上游拉不到时保留原有列表并报错，不会清空）。
 
 **为什么 `/models` 里一开始看不到新供应商**：provider 声明为 `activation: "auto"`，
@@ -114,7 +114,7 @@ API Key 只在你贴入时经过本插件的内存，不落任何本项目自己
 ## 维护注册表
 
 改注册表源（`registry/index.json` / `registry/providers/**` / `registry/models/**`）提交后，**下一次这个插件被加载时**才会跟上：加载时若缓存已超过 6 小时（TTL）就重新拉取。
-插件**没有后台定时器**，所以一个连着跑很久的服务不会自己刷新——想立刻生效就在 `/connect-providers` 弹窗里按 `Mod+R`（强制刷新），或 `opencode service restart`。
+插件**没有后台定时器**，所以一个连着跑很久的服务不会自己刷新——想立刻生效就在 `/connect-providers` 弹窗里按 `Ctrl+R`（强制刷新），或 `opencode service restart`。
 拉取先抓 manifest（`ETag`）；`revision` 与缓存一致就不重拉子文件，变了才并发拉各分文件并重新聚合；网络失败时继续沿用本地缓存，不会把供应商列表清空。
 
 ### 结构
@@ -127,7 +127,7 @@ registry/
   providers/my-gateway/
     provider.json                  # 供应商参数
     models.json                    # 该家模型（key = 模型 ID）
-  models/some-model.json           # 顶层共享模型（可选；多家用 base 引用）
+  models/some-lab/some-model.json    # 顶层共享模型（可选；多家用 base 引用）
 ```
 
 `providers/<id>/provider.json`：
@@ -144,8 +144,8 @@ registry/
 
 ```jsonc
 {
-  "some-model": { "base": "some-model", "name": "Some Model", "limit": { "context": 131072, "output": 16384 } },
-  "some-model-fast": { "base": "some-model", "modelID": "some-model-2026-01" }
+  "some-model": { "base": "some-lab/some-model", "name": "Some Model", "limit": { "context": 131072, "output": 16384 } },
+  "some-model-fast": { "base": "some-lab/some-model", "modelID": "some-model-2026-01" }
 }
 ```
 
@@ -175,7 +175,7 @@ registry/
 | 模型 `modelID` | 发给上游的真实模型/部署 ID，默认等于上面的 key |
 | 模型 `limit` | `context` / `output` 必填（无 `base` 时），`input` 可选 |
 | 模型 `cost` | 每百万 token 美元；`cache_read`/`cache_write` 可选 |
-| 模型 `tools` / `input` / `output` | 能力：是否支持工具调用、输入/输出模态，默认 `true` / `["text"]` |
+| 模型 `tools` / `input` / `output` | 能力：是否支持工具调用、输入/输出模态，默认 `true` / `["text"]`；**`input` 要多模态必须显式写**（技能会用多选问你） |
 | 模型 `reasoningField` / `maxTokensField` | 映射到 `Model.Compatibility` |
 | 模型 `variants` | `[{ "id": "high", "settings": {} }]` |
 | 模型 `status` / `disabled` | 生命周期标记；`disabled: true` 不出现在 `/models` |
