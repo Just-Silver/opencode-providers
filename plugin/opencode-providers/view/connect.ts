@@ -2,13 +2,16 @@
  * `/connect-providers` flow.
  *
  * Mirrors the built-in `/connect` interaction for the providers this plugin
- * registers: pick a provider, then either add an account (paste an API key) or
- * activate one that already exists. Everything goes through the normal server
- * API, so credentials land in opencode's own store.
+ * registers: pick a provider, then either add an account (paste an API key),
+ * activate one that already exists, rename it, or delete it. Everything goes
+ * through the normal server API, so credentials land in opencode's own store.
  *
- * Out of scope on purpose (use the built-in `/connect` for these): renaming and
- * deleting accounts. Renaming needs a bound footer action; deletion needs a
- * confirm binding. Both are cosmetic actions on the same records.
+ * Why this looks a bit different from the built-in dialog: the plugin API
+ * (`ctx.ui.dialog.select`) is a one-shot, non-reactive wrapper. Options are
+ * frozen when the prompt opens and actions cannot be hidden or disabled, so we
+ * cannot mutate a row in place the way the core `DialogIntegration` does. This
+ * flow instead re-opens the account manager after every mutation to show fresh
+ * state, and uses `dialog.confirm` for the delete confirmation.
  */
 
 import type { IntegrationInfo } from "@opencode/client"
@@ -18,52 +21,88 @@ import { registryRpc } from "../rpc.ts"
 
 type Context = Plugin.Context
 type Connection = IntegrationInfo["connections"][number]
+type CredentialConnection = Extract<Connection, { type: "credential" }>
 
 const INTEGRATION_SOURCE = "opencode-providers"
 const ADD_ACCOUNT = "\u0000add-account"
 
 export async function connectProviders(ctx: Context): Promise<void> {
-  const integrations = ownIntegrations(ctx).toSorted((a, b) => a.name.localeCompare(b.name))
+  while (true) {
+    const integrations = ownIntegrations(ctx).toSorted((a, b) => a.name.localeCompare(b.name))
 
-  if (integrations.length === 0) {
-    // Nothing to connect yet — offer the refresh here rather than making the user
-    // restart the service and wait out the 6h TTL.
-    const confirmed = await ctx.ui.dialog.confirm({
-      title: "Connect providers",
-      message:
-        "No providers from the registry are available. Force a refresh to re-fetch the registry, then run /connect-providers again.",
-      label: { confirm: "Force refresh" },
-    })
-    if (confirmed) {
-      if (await forceRefresh(ctx)) {
-        ctx.ui.toast.show({ variant: "info", message: "Reloaded. Run /connect-providers again to connect a provider." })
+    if (integrations.length === 0) {
+      // Nothing to connect yet — offer the refresh here rather than making the user
+      // restart the service and wait out the 6h TTL.
+      const confirmed = await ctx.ui.dialog.confirm({
+        title: "Connect providers",
+        message:
+          "No providers from the registry are available. Force a refresh to re-fetch the registry, then run /connect-providers again.",
+        label: { confirm: "Force refresh" },
+      })
+      if (confirmed) {
+        if (await refreshWithProgress(ctx)) {
+          ctx.ui.toast.show({
+            variant: "info",
+            message: "Reloaded. Run /connect-providers again to connect a provider.",
+          })
+        }
       }
+      return
     }
+
+    let refreshRequested = false
+    const selected = await ctx.ui.dialog.select<string>({
+      title: "Connect providers",
+      options: integrations.map((integration) => ({
+        title: integration.name,
+        value: integration.id,
+        footer: footer(integration),
+      })),
+      actions: [
+        {
+          title: "Force refresh",
+          bind: "ctrl+r",
+          selection: "none",
+          onTrigger: () => {
+            refreshRequested = true
+            ctx.ui.dialog.clear()
+          },
+        },
+      ],
+    })
+
+    // The dialog is static, so a triggered action only records intent and closes
+    // the prompt; the work (and the re-open with fresh data) happens out here.
+    if (refreshRequested) {
+      await refreshWithProgress(ctx)
+      continue
+    }
+    if (selected === undefined) return
+
+    const integration = integrations.find((item) => item.id === selected)
+    if (integration === undefined) return
+
+    await openProvider(ctx, integration)
     return
   }
+}
 
-  const selected = await ctx.ui.dialog.select<string>({
-    title: "Connect providers",
-    options: integrations.map((integration) => ({
-      title: integration.name,
-      value: integration.id,
-      footer: footer(integration),
-    })),
-    actions: [
-      {
-        title: "Force refresh",
-        bind: "ctrl+r",
-        selection: "none",
-        onTrigger: () => void forceRefresh(ctx),
-      },
-    ],
-  })
-  if (selected === undefined) return
-
-  const integration = integrations.find((item) => item.id === selected)
-  if (integration === undefined) return
-
-  await openProvider(ctx, integration)
+/**
+ * Re-fetch the registry behind a blocking modal, then drop the modal.
+ *
+ * `dialog.alert` is the only JSX-free primitive that actually blocks: while it
+ * is open the host pushes the `modal` keymap mode, so the prompt (and therefore
+ * `/connect-providers` and the `ctrl+r` binding that lives on the list dialog)
+ * is unreachable. The modal has `ok`/`esc` affordances, but we always close it
+ * ourselves in `finally` — the user never has to.
+ */
+async function refreshWithProgress(ctx: Context): Promise<boolean> {
+  void ctx.ui.dialog.alert({ title: "Connect providers", message: "Refreshing registry…" })
+  try {
+    return await forceRefresh(ctx)
+  } finally {
+    ctx.ui.dialog.clear()
+  }
 }
 
 /**
@@ -71,8 +110,23 @@ export async function connectProviders(ctx: Context): Promise<void> {
  * provider list. Returns whether it succeeded. A failure only surfaces as an
  * error toast: the previously registered providers stay usable, so nothing is
  * invalidated.
+ *
+ * Single-flight: concurrent callers share one refresh. The blocking modal makes
+ * a second trigger hard to reach, but the command palette is `mode: "global"`
+ * and can still re-enter this flow, so the guard keeps network work idempotent.
  */
-export async function forceRefresh(ctx: Context): Promise<boolean> {
+let refreshInFlight: Promise<boolean> | undefined
+
+export function forceRefresh(ctx: Context): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight
+  const pending = doRefresh(ctx).finally(() => {
+    if (refreshInFlight === pending) refreshInFlight = undefined
+  })
+  refreshInFlight = pending
+  return pending
+}
+
+async function doRefresh(ctx: Context): Promise<boolean> {
   try {
     const result = await ctx.client.rpc(registryRpc).refresh({})
     if (!result.ok) {
@@ -92,45 +146,141 @@ export async function forceRefresh(ctx: Context): Promise<boolean> {
   }
 }
 
+/**
+ * Account manager. Loops so mutations (add / activate / rename / delete) land on
+ * a freshly re-read account list while the prompt stays open, matching the
+ * built-in behaviour. Returns when the user backs out.
+ */
 async function openProvider(ctx: Context, integration: IntegrationInfo): Promise<void> {
-  const credentials = credentialConnections(integration)
-  const active = credentials[0]
+  while (true) {
+    const current = integrationByID(ctx, integration.id) ?? integration
+    const credentials = credentialConnections(current)
+    const active = credentials[0]
 
-  if (credentials.length === 0) {
-    await connectKey(ctx, integration)
-    return
+    if (credentials.length === 0) {
+      await connectKey(ctx, current)
+      return
+    }
+
+    let rename: string | undefined
+    let remove: string | undefined
+    const choice = await ctx.ui.dialog.select<string>({
+      title: current.name,
+      current: active?.id,
+      options: [
+        {
+          title: "Add account",
+          value: ADD_ACCOUNT,
+          description: "Paste another API key; it becomes the active account",
+        },
+        ...credentials.toSorted((a, b) => a.label.localeCompare(b.label)).map((credential) => ({
+          title: credential.label,
+          value: credential.id,
+          category: "Accounts",
+          footer: credential.id === active?.id ? "active" : undefined,
+        })),
+      ],
+      actions: [
+        {
+          title: "rename",
+          bind: "ctrl+r",
+          selection: "required",
+          onTrigger: (value) => {
+            // Actions cannot be hidden while "Add account" is focused, so guard here.
+            if (value === ADD_ACCOUNT) return
+            rename = value
+            ctx.ui.dialog.clear()
+          },
+        },
+        {
+          title: "delete",
+          bind: "ctrl+d",
+          selection: "required",
+          onTrigger: (value) => {
+            if (value === ADD_ACCOUNT) return
+            remove = value
+            ctx.ui.dialog.clear()
+          },
+        },
+      ],
+    })
+
+    if (rename !== undefined) {
+      await renameAccount(ctx, current, rename)
+      continue
+    }
+    if (remove !== undefined) {
+      if (await deleteAccount(ctx, current, remove)) return
+      continue
+    }
+
+    if (choice === undefined) return
+
+    if (choice === ADD_ACCOUNT) {
+      await connectKey(ctx, current)
+      continue
+    }
+
+    if (choice === active?.id) continue
+    const credential = credentials.find((item) => item.id === choice)
+    try {
+      await ctx.client.credential.activate({ credentialID: choice })
+      await reloadIntegrations(ctx)
+      ctx.ui.toast.show({ variant: "success", message: `Activated ${credential?.label ?? choice}` })
+    } catch (error) {
+      ctx.ui.toast.show({ variant: "error", message: message(error) })
+    }
   }
+}
 
-  const choice = await ctx.ui.dialog.select<string>({
-    title: integration.name,
-    current: active?.id,
-    options: [
-      {
-        title: "Add account",
-        value: ADD_ACCOUNT,
-        description: "Paste another API key; it becomes the active account",
-      },
-      ...credentials.toSorted((a, b) => a.label.localeCompare(b.label)).map((credential) => ({
-        title: credential.label,
-        value: credential.id,
-        category: "Accounts",
-        footer: credential.id === active?.id ? "active" : undefined,
-      })),
-    ],
+async function renameAccount(ctx: Context, integration: IntegrationInfo, credentialID: string): Promise<void> {
+  const credential = credentialConnections(integration).find((item) => item.id === credentialID)
+  if (credential === undefined) return
+
+  const value = await ctx.ui.dialog.prompt({
+    title: "Rename account",
+    placeholder: "Account name",
+    value: credential.label,
   })
-  if (choice === undefined) return
+  if (value === undefined) return
 
-  if (choice === ADD_ACCOUNT) {
-    await connectKey(ctx, integration)
-    return
-  }
+  const label = value.trim()
+  if (label === "" || label === credential.label) return
 
-  const credential = credentials.find((item) => item.id === choice)
   try {
-    await ctx.client.credential.activate({ credentialID: choice })
-    ctx.ui.toast.show({ variant: "success", message: `Activated ${credential?.label ?? choice}` })
+    await ctx.client.credential.update({ credentialID, label })
+    await reloadIntegrations(ctx)
+    ctx.ui.toast.show({ variant: "success", message: `Renamed to ${label}` })
   } catch (error) {
     ctx.ui.toast.show({ variant: "error", message: message(error) })
+  }
+}
+
+/** Returns whether the manager should close (the last account was removed). */
+async function deleteAccount(ctx: Context, integration: IntegrationInfo, credentialID: string): Promise<boolean> {
+  const credentials = credentialConnections(integration)
+  const credential = credentials.find((item) => item.id === credentialID)
+  if (credential === undefined) return false
+
+  const confirmed = await ctx.ui.dialog.confirm({
+    title: "Delete account",
+    message: `Delete "${credential.label}" from ${integration.name}?`,
+    label: { confirm: "Delete", cancel: "Cancel" },
+  })
+  if (confirmed !== true) return false
+
+  const last = credentials.length === 1
+  try {
+    await ctx.client.credential.remove({ credentialID })
+    await reloadIntegrations(ctx)
+    if (last) {
+      ctx.ui.toast.show({ variant: "success", message: `Disconnected ${integration.name}` })
+      return true
+    }
+    return false
+  } catch (error) {
+    ctx.ui.toast.show({ variant: "error", message: message(error) })
+    return false
   }
 }
 
@@ -147,10 +297,20 @@ async function connectKey(ctx: Context, integration: IntegrationInfo): Promise<v
 
   try {
     await ctx.client.integration.connect.key({ integrationID: integration.id, key: key.trim() })
-    ctx.data.location.integration.invalidate(ctx.location)
+    await reloadIntegrations(ctx)
     ctx.ui.toast.show({ variant: "success", message: `${integration.name} connected` })
   } catch (error) {
     ctx.ui.toast.show({ variant: "error", message: message(error) })
+  }
+}
+
+/** Drop the cached integration list and re-read it so the loop sees fresh accounts. */
+async function reloadIntegrations(ctx: Context): Promise<void> {
+  ctx.data.location.integration.invalidate(ctx.location)
+  try {
+    await ctx.data.location.integration.sync(ctx.location)
+  } catch {
+    // A failed sync still leaves `list()` readable; the next action retries.
   }
 }
 
@@ -160,9 +320,13 @@ function ownIntegrations(ctx: Context): IntegrationInfo[] {
   )
 }
 
-function credentialConnections(integration: IntegrationInfo): Array<Extract<Connection, { type: "credential" }>> {
+function integrationByID(ctx: Context, id: string): IntegrationInfo | undefined {
+  return ownIntegrations(ctx).find((integration) => integration.id === id)
+}
+
+function credentialConnections(integration: IntegrationInfo): CredentialConnection[] {
   return integration.connections.filter(
-    (connection): connection is Extract<Connection, { type: "credential" }> => connection.type === "credential",
+    (connection): connection is CredentialConnection => connection.type === "credential",
   )
 }
 

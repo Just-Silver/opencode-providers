@@ -415,8 +415,8 @@ OAuth 在 `resolve` 时若距 `expires` 不足 5 分钟会自动 refresh（`:696
 
 - 源码在 `plugin/opencode-providers/`（**不放** `.opencode/plugins/`，否则仓库自身成为发现根、与全局安装同 id 相撞）；
 - 注册表在 `registry/`（分文件：`index.json` manifest + `providers/**` + `models/**`），GitHub raw 直供；
-- 根 `package.json` 是 npm 包形态（`exports{./server,./tui}`），既能 `"plugins": ["@justsilver/opencode-providers"]` 配置安装，
-  也能用 `install.sh` / `install.ps1` 脚本安装；
+- 根 `package.json` 是 npm 包形态（`exports{./server,./tui,./rpc}`），在 `plugins` 里写 `"@justsilver/opencode-providers"` 安装
+  （本地开发可指向工作树**绝对路径目录**；不再提供安装脚本）；
 - 目录内双入口：`index.ts`（server，拉注册表并注册）+ `tui.ts`（只注册 `/connect-providers`，不读注册表）。
 
 ## 坑 / 注意
@@ -431,7 +431,7 @@ OAuth 在 `resolve` 时若距 `expires` 不足 5 分钟会自动 refresh（`:696
 
 ## 实测踩坑：本地 server 插件**不能** import `@opencode/plugin`
 
-opencode **2.0.24** 实测：脚本安装到 `~/.config/opencode/plugins/<name>/` 的插件，若 `index.ts` 里写
+opencode **2.0.24** 实测：本地目录插件（或 npm 包）的 server 入口，若 `index.ts` 里写
 `import { Plugin, Provider, Integration } from "@opencode/plugin"`，加载直接失败：
 
 ```
@@ -512,7 +512,7 @@ opencode api delete /api/credential/<cred_id>   # 用完清理
    - `POST /api/integration/probe-check/connect/key` 后出现模型，且 `modelID` 覆盖 / `limit` / `variants` 与注册表一致；
      同时 `/api/provider` 显示 `activation:"auto"`、`integrationID:"probe-check"`、`package`、`settings.baseURL`；
    - `DELETE /api/credential/<id>` 后回到 0 条；
-4. 用 `install.sh --local` / `install.ps1 -Local` 覆盖回真实源码，再确认 `probe-check` 已消失。
+4. 把配置/`DEFAULT_REGISTRY_URL` 指回真实源码，再确认 `probe-check` 已消失。
 5. **删掉探针留下的缓存行**（否则 `kv` 里永久多一条死行，见上一节的教训）：
 
    ```bash

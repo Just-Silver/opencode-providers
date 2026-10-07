@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/connect-providers` 账号管理支持**重命名**（`ctrl+r`，弹窗预填当前名称）与**删除**（`ctrl+d`，二次确认后删除）；
+  删除最后一个账号时提示 `Disconnected <name>` 并关闭弹窗（该供应商随之从 `/models` 消失）。
+  动作触发后**留在弹窗**并原地刷新（与内置 `/connect` 一致）；选中已激活账号不再重复调用 activate
+- 强制刷新改为**阻塞式进度模态**（`dialog.alert`，刷新结束自动 `clear`）：刷新期间输入被模态捕获、无法重复触发；
+  `forceRefresh` 增加**单飞**（并发调用共用同一次刷新）
+
+### Changed
+
+- **移除安装脚本**：不再提供 `install.sh` / `install.ps1` / `uninstall.sh` / `uninstall.ps1`，本插件**只通过 npm 包分发**；
+  本地开发改为在 `plugins` 里指向工作树的**绝对路径目录**（opencode 按「本地目录插件」加载，改完自动热重载）
+
 ## [0.2.1] - 2026-10-07
 
 ### Fixed

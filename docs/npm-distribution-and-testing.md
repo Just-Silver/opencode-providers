@@ -8,7 +8,8 @@
 
 本插件走 **npm 包 + 预发布优先**：`package.json` 是版本单一来源，先把 `0.1.0-beta.x` 发到 npm 的 **`next`** dist-tag 试装，
 确认没问题再发正式版到 `latest`（正式版**必须手动确认**，流水线里拦着）。
-同时保留脚本安装（把目录复制到 `~/.config/opencode/plugins/`）作为零依赖的备用路径。
+**只走 npm**（不再提供安装脚本）；本地开发在 `plugins` 里指向工作树**绝对路径目录**（opencode 按「本地目录插件」加载，
+改完自动热重载），见 README「本地开发」。
 
 ## 1. 包形状（npm / 配置安装）
 
@@ -34,9 +35,19 @@
 
 **现象**（opencode-goal 实测）：配置安装的 TUI 插件能画首帧，之后**永不刷新**（切一次会话才显示）。
 
-**源码级根因**：TUI 运行时注册了 Solid 转换器与运行时重写器；重写器只能重写**源码文本里可见**的 import。
-JSX 的 `import … from "@opentui/solid/jsx-runtime"` 是 Bun 转译时**注入**的，源码里不存在 → 不被重写 →
-命中插件自己 `node_modules` 里的那份 Solid → 第二套响应式图。
+**源码级根因**（已挖到桥接插件本体）：TUI 运行时经 `ensureRuntimePluginSupport`（`packages/tui/src/plugin/runtime-plugin-support.bun.ts`）注册两个 Bun 插件——
+
+1. **Solid 转换器** `@opentui/solid/scripts/solid-plugin.js`：onLoad 编译 JSX、把 jsx-runtime 指向宿主
+   （`moduleName` 默认 `"@opentui/solid"`）；但它的 filter 是 `^(?!.*[/\\]node_modules[/\\])…\.tsx?$`，**明确排除 `node_modules`**
+   → npm 装进 `node_modules` 的插件，JSX **不由它编译**，落到 Bun 默认 TSX loader。
+2. **运行时重写器** `@opentui/core/runtime-plugin.js`：把 `@opentui/core`、`solid-js`、`additional`（含 `@opencode/plugin/tui`）
+   等 specifier 重写成虚拟模块 `opentui:runtime-module:*`，从而共享**宿主的同一份实例**；但它对 `node_modules` 文件
+   **是否重写靠对源码文本做正则 prescan**（`resolveImportSpecifierPatterns`：`from "…"` / `import "…"` / `import(…)` / `require(…)`）。
+
+**缝隙**：JSX 的 `import … from "@opentui/solid/jsx-runtime"` 是 Bun 转译时**注入**的，源码文本里不存在 → prescan 看不见 →
+不重写 → 保留成裸 specifier。**发现式安装**（`~/.config/opencode/plugins/`，无 `node_modules`）时它回落到宿主那份 →
+侥幸共享；**npm / 配置安装**时 npm 把 peer（`solid-js`/`@opentui/*`）装进**插件自己的 `node_modules`** → 命中那份 →
+**第二套响应式图**（宿主 signal 更新通知不到插件组件，首帧之后永不重算）。
 
 **推论（也是本仓的做法）**：只要 TUI 入口**不写 JSX**，就不注入 `jsx-runtime`，npm / 配置安装照常工作。
 本插件的 `/connect-providers` 只用 `ctx.ui.dialog.{select,prompt,alert}` 与 `ctx.ui.toast`（宿主渲染），
@@ -69,10 +80,10 @@ JSX 的 `import … from "@opentui/solid/jsx-runtime"` 是 Bun 转译时**注入
 
 | 层 | 手段 | 覆盖什么 |
 |---|---|---|
-| 单测 | `node --test`（本仓 31 条，零依赖） | 注册表 schema、模型映射、拉取缓存/陈旧回退、版本一致性工具 |
+| 单测 | `node --test`（本仓，零依赖） | 注册表 schema、模型映射、拉取缓存/陈旧回退、`/connect-providers` 交互（假 ctx）、版本一致性工具 |
 | CI | `.github/workflows/ci.yml` | 版本一致性 + 单测 |
 | 真机冒烟（HTTP） | `node scripts/smoke-api.mjs`（本仓） | 插件已加载（`/api/plugin`）、供应商已注册（`/api/integration`）、凭据→模型→清理（`/api/model`） |
-| 真机手测 | 在 TUI 里敲 `/connect-providers` | 命令面交互（选供应商 / 贴 key / 切账号）——**脚本覆盖不到**，只能人看 |
+| 真机手测 | 在 TUI 里敲 `/connect-providers` | 命令面交互（选供应商 / 贴 key / 切账号 / 改名 `ctrl+r` / 删除 `ctrl+d` / 强制刷新 `ctrl+r`）——**脚本覆盖不到**，只能人看 |
 
 `scripts/smoke-api.mjs` 的要点（照搬 opencode-goal 的姿势）：
 

@@ -3,7 +3,7 @@
 `opencode-providers`：给 opencode 补上 **models.dev 目录里没有的供应商**。
 一份自维护注册表（**按供应商分文件**：`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`，GitHub raw 托管；插件运行期拉取并聚合成一份）+ 一个 opencode 插件，实现**零 `opencode.json`** 接入。
 
-现状：`0.1.0` 是**正式版**（npm `latest`，OIDC 发布 + provenance）；预发布在 `next`。
+现状：`0.2.1` 是**正式版**（npm `latest`，OIDC 发布 + provenance）；预发布在 `next`。
 
 # 语言规则
 
@@ -11,10 +11,12 @@
 
 # 结构硬约束
 
-- 插件在**安装后**必须是 `plugins/` 的**直接子目录**：`~/.config/opencode/plugins/opencode-providers/`
-  （不可再嵌套；直接子 `.tsx` 文件不会被发现，只认 `.ts`/`.js`）
-- **仓库内的源码故意放在 `plugin/opencode-providers/`（不在 `.opencode/plugins/` 下）**，安装脚本整目录复制到全局 `plugins/`。
-  原因：仓库若自身就是一个发现根，则在仓库里跑 opencode 时仓库副本与全局副本**同 id 相撞**，
+- **只通过 npm 包分发**（`opencode.json` 的 `plugins` / `opencode plugin add`），**没有安装脚本**。
+  本地开发：`plugins` 里给一个**绝对路径目录**（须含 `index.ts`+`tui.ts`）→ opencode 按「本地目录插件」处理，
+  改源码被文件监视热重载（`packages/core/src/plugin/supervisor.ts:254` `path.isAbsolute` → `{type:"local"}`；
+  `module.ts:94-97` 目录走 `Host.resolve({directory})`，`host.ts:17-43` 解析 `server`/`tui`）。
+- **仓库内的源码故意放在 `plugin/opencode-providers/`（不在 `.opencode/plugins/` 下）**：
+  `.opencode/plugins/` 是自动发现根，放在那里会让「在仓库里跑 opencode」与 npm 那份**同 id 相撞**，
   supervisor 保留首个、把后来者标成 `failed`（`Duplicate plugin ID: opencode-providers`），
   在 `/plugins` 面板显示一条失败的 red row（功能其实正常，但很误导）。
   证据：`packages/core/src/plugin/supervisor.ts:96-111`（`failures` 里塞入重复项，`state.status="failed"`）。
@@ -23,16 +25,17 @@
   - `tui.ts` = **TUI 入口**：只注册 `/connect-providers` 命令与交互（**不读注册表**，命令里读服务端已注册的 integration）；
     图层必须写 **`mode: "global"`**（图层 mode 默认 `"base"`，而提示框 push 的是 `"composer"`／补全时 `"autocomplete"`
     → 漏了就会"插件 active 但看不到命令"；证据：`packages/tui/src/context/keymap.tsx:209-214` + `component/prompt/autocomplete.tsx:474-483`）
-- **server 入口不得 import 任何 `@opencode/*`（实测踩坑，opencode 2.0.24）**：脚本安装的本地 server 插件拿不到
-  `@opencode/plugin`，会以 `ResolveMessage: Cannot find package '@opencode/plugin'` 加载失败（`/api/plugin` 里 `status: failed`）。
+- **server 入口不得 import 任何 `@opencode/*`（实测踩坑，opencode 2.0.24）**：`@opencode/plugin` 只注入给 TUI 入口，
+  server 入口（本地目录或 npm 包都一样）拿不到它——包内也没声明该依赖，消费方装不到——
+  会以 `ResolveMessage: Cannot find package '@opencode/plugin'` 加载失败（`/api/plugin` 里 `status: failed`）。
   `@opencode/plugin/tui` **是**注入的，TUI 入口照常 import。运行时需要的都是普通值：
   `Plugin.define` 是恒等函数（`export default { id, setup }`）、`Provider.ID.make`/`Integration.ID.make` 就是字符串、
   `Provider.Info.empty(id)` = `{ id, name: id, activation: "auto", package: "" }`。类型可用 `import type` 或本地结构化接口。
 - 相对导入必须带显式扩展名（`./registry/schema.ts`）：server 插件由 bun 逐文件加载，TUI 侧同样；
   纯逻辑模块也要能被 `node --test` 原生 TS 解析
 - `registry/` 与 `view/` 视为插件子模块，只被两个入口 import
-- **有根 `package.json`（npm 包形态）**：`type: module`；`exports["./server"]` / `["./tui"]`；`files` 白名单；
-  `publishConfig.tag = next`。既支持 `"plugins": ["@justsilver/opencode-providers"]` 配置安装，也支持脚本安装
+- **有根 `package.json`（npm 包形态）**：`type: module`；`exports["./server"]` / `["./tui"]` / `["./rpc"]`；`files` 白名单；
+  `publishConfig.tag = next`。使用方在 `plugins` 里写 `"@justsilver/opencode-providers"`（或 `opencode plugin add …`）
 - **TUI 入口不写 JSX（故文件名是 `tui.ts` 而非 `.tsx`）**：JSX 会让 Bun 注入 `@opentui/solid/jsx-runtime`，
   而运行时重写器只重写「源码文本里可见」的 import → 配置安装（`node_modules`）下会命中插件自带的 Solid 副本，
   变成**第二套响应式图**（现象：只渲染首帧、之后永不刷新）。不写 JSX 就完全绕开；也**不要**声明
@@ -72,7 +75,6 @@
 - 认证走 **npm Trusted Publishing（OIDC，`id-token: write`，无长期 token）**；但**包必须已存在**，
   所以 `0.1.0-beta.0` 需要**人工首发一次**，之后才交给 CD。npm 侧的 Workflow filename 必须与 `release.yml` 同名
 - 预检用 `npm pack --dry-run`，**别用 `npm publish --dry-run`**（后者会因「版本已存在」而报错，哪怕只是想预检）
-- `install.sh` / `install.ps1` 取源：最新 Release tag 优先，仓库无 Release 时回退 `main`
 - `.github/workflows/ci.yml` 在 push main / PR 上跑「版本一致性 + `node --test`」；**没有 lint/typecheck/formatter**，
   改完必须自己跑单测 + esbuild（下面）
 - 使用方安装/升级（`opencode plugin` 子命令实测存在，`packages/cli/src/commands/commands.ts:269-311`）：
@@ -93,7 +95,7 @@
     --external:@opencode/plugin/tui --outfile=dist/providers-tui.js   # 注入包必须标 external，否则 esbuild 解析失败（实测 exit 1）
   ```
 - npm 打包预检（不发布）：`npm pack --dry-run`（确认 `plugin/**/*.ts` + CHANGELOG 进了 tarball）
-- 安装后**通常无需重启**：覆盖插件目录里的文件会被文件监视热重载（实测 `/api/plugin` 立刻变为 `status=active`）；必要时再 `opencode service restart`
+- **本地目录插件**通常无需重启：改源码被文件监视热重载（实测 `/api/plugin` 立刻变为 `status=active`）；必要时再 `opencode service restart`
 - 验证注册真的生效：**一条命令** `node scripts/smoke-api.mjs`（对照下面的手工证据链）
   ```
   opencode api get  /api/plugin       # 自己那条必须 state.status=active、features.server/tui=true；**多于 1 条 = 同 id 被发现两次**
@@ -104,14 +106,11 @@
   opencode api delete /api/credential/<cred_id>     # 验证完清理，别留假凭据
   ```
 - 注册表没生效时先看 `/api/plugin` 的 `state.status`，再看 server 日志里的 `failed to load plugin ... cause=`
-- **插件目录被发现两次就会有一条 `failed`**：同一个插件 id 同时存在于全局（`~/.config/opencode/plugins/`）与
-  某个项目的 `.opencode/plugins/` 时，按 boot 顺序**首见者生效**、后者在 `/api/plugin` / `/plugins` 面板里显示
-  `failed` + `Duplicate plugin ID: <id>`。本仓源码已移出 `.opencode/plugins/` 从而不会自撞；排查别人的项目时按这条判据看
-- **安装脚本已端到端实测**：`pwsh -NoProfile -File .\install.ps1` → 无 Release 时解析 `main` → clone → 原子替换 →
-  插件被文件监视热重载为 `status=active`、集成仍在；安装后文件是 **CRLF**（`* text=auto` + 本机 `core.autocrlf=true`），
-  **Bun 执行正常**（实测 active），只有 `*.sh` 被 `.gitattributes` 固定为 LF（因为要 `curl … | bash`）
-- 开发时把工作树部署到全局：`pwsh -NoProfile -File .\install.ps1 -Local` / `bash install.sh --local`（含未提交改动）；
-  **npm 安装与脚本安装同 id 不可并存**（同时存在 = 一条 `failed`），切换时把另一份移出发现根或删掉
+- **同一插件 id 被发现两次就会有一条 `failed`**：npm 包（或本地目录插件）与某个项目的 `.opencode/plugins/` 里那份撞名时，
+  按 boot 顺序**首见者生效**、后者在 `/api/plugin` / `/plugins` 面板里显示 `failed` + `Duplicate plugin ID: <id>`。
+  本仓源码已移出 `.opencode/plugins/` 从而不会自撞；排查别人的项目时按这条判据看
+- **本地开发**：`plugins` 指向工作树绝对路径目录（见「结构硬约束」）→ 改源码自动热重载，无需发布/安装；
+  与 npm 包**同 id 不可并存**（同时配 = 一条 `failed`）
 - **注册表 id 与 `opencode.json` 里 `providers.<id>` 撞名时会「各管一半」**：integration 的 `metadata.source`/`keyLabel`/`methods` 用注册表那份，
   但 provider 的 `activation` 与 `settings.apiKey` 仍是配置那份（`enabled` + 明文 env key）⇒ 模型无凭据也可见、`auto` 语义失效。
   要完全走注册表就删掉配置里那一块；只想用 `{env:…}` 就别写进注册表 —— 同 id 两边只留一边

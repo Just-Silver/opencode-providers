@@ -7,14 +7,15 @@
 registry/index.json              ← manifest：schemaVersion / revision / providers[]（CLI 自动维护）
 registry/providers/<id>/          ← 每家：provider.json（供应商参数）+ models.json（该家模型）
 registry/models/<lab>/<model>.json ← 顶层共享模型（多家用 base 引用）
-plugin/opencode-providers/       ← 插件源码（安装时整目录复制到 ~/.config/opencode/plugins/）
+plugin/opencode-providers/       ← 插件源码（npm 包的 server / tui 入口所在）
 ├── index.ts                     ← server 入口：拉注册表 → 注册 integration/provider/models
 ├── tui.ts                       ← TUI 入口：注册 /connect-providers 命令（不写 JSX，见下）
 ├── registry/                    ← 纯逻辑：schema 校验 / 元数据映射 / 拉取缓存
 └── view/                        ← /connect-providers 交互
 ```
 
-> 源码**故意不放在 `.opencode/plugins/` 下**：那样在本仓库里跑 opencode 时，仓库副本会和全局安装副本撞同一个插件 id，
+> 源码**故意不放在 `.opencode/plugins/` 下**：opencode 会自动发现该目录下的插件，
+> 那样在本仓库里跑 opencode 时就会和 npm/全局那份撞同一个插件 id，
 > 被 supervisor 判为 `Duplicate plugin ID: opencode-providers`，在 `/plugins` 面板里显示成一条 `failed`（实际加载的是另一条，功能正常）。
 
 ## 为什么需要它
@@ -25,8 +26,7 @@ OpenCode 的供应商清单来自 models.dev 目录，**目录里没有的供应
 
 ## 安装
 
-### 方式 A：npm 包（推荐）
-
+本插件**只通过 npm 包分发**（走 opencode 的 `plugins` 配置或 `opencode plugin add`），没有安装脚本。
 在 `opencode.json(c)` 里写一行（不需要手写 provider/模型）：
 
 ```jsonc
@@ -58,35 +58,24 @@ OpenCode 的供应商清单来自 models.dev 目录，**目录里没有的供应
   }
   ```
 
-### 方式 B：安装脚本（零依赖备用路径）
+装完**通常无需重启**（插件被文件监视，覆盖后自动热重载）；必要时 `opencode service restart`。
+卸载：`opencode plugin remove @justsilver/opencode-providers`（或把 `plugins` 里那一行删掉）。
 
-```bash
-# Linux / macOS
-./install.sh
+### 本地开发：直接跑工作树
+
+不想先发版也能让 opencode 加载**当前工作树**——`plugins` 里给一个**绝对路径目录**即可
+（opencode 对绝对路径按「本地目录插件」处理；该目录需含 `index.ts` 与 `tui.ts`）：
+
+```jsonc
+{
+  "plugins": [
+    { "package": "E:/Code/Projects/Agent/opencode-providers/plugin/opencode-providers" }
+  ]
+}
 ```
 
-```powershell
-# Windows
-.\install.ps1
-```
-
-脚本把 `plugin/opencode-providers/` 整目录装到：
-
-```
-~/.config/opencode/plugins/opencode-providers/        # $XDG_CONFIG_HOME 优先
-```
-
-装完**通常无需重启**（插件目录被文件监视，覆盖后自动热重载）；必要时 `opencode service restart`。
-卸载：`./uninstall.sh` / `.\uninstall.ps1`。
-
-开发时把**工作树**（含未提交改动）直接部署到全局插件目录：
-
-```bash
-bash install.sh --local
-```
-```powershell
-pwsh -NoProfile -File .\install.ps1 -Local
-```
+这样改完源码会被文件监视热重载，无需发布、也无需 `npm install`。
+（它和 npm 包**同 id**，别同时留着两条，否则 `/plugins` 面板会出现一条 `failed`。）
 
 ## 使用
 
@@ -187,7 +176,7 @@ registry/
 - **不做参数推断**：注册表写什么就是什么，插件不会去猜 `limit`/`cost`。
 - **不调供应商 API**：不访问 `/v1/models`，也就没有运行期的额外网络与失败面。
 - **不声明 `env` 认证**：本插件只走 `/connect`-式交互；opencode 的 env 是静默旁路且不在 `/connect` 里展示。
-- 账号重命名/删除请用内置 `/connect`（同一个 integration，同一个凭据表）。
+- 不改注册表来源时**不需要** `opencode.json` 里的 `providers` 声明（那是另一条路线）。
 
 ## 开发
 
@@ -231,9 +220,9 @@ push tag `vX.Y.Z-beta.n`（或 Actions → Release → Run workflow 勾 `publish
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| `/plugins` 面板里本插件有**一条 `failed`** | 同一插件 id 被发现两次（例：脚本装到 `~/.config/opencode/plugins/` + 又在 `opencode.json` 里配了 npm 包，或某个项目的 `.opencode/plugins/` 里也有一份）。supervisor 保留首个、把后来者标成 `failed`，错误信息是 `Duplicate plugin ID: opencode-providers`。删掉多余的那份即可 |
+| `/plugins` 面板里本插件有**一条 `failed`** | 同一插件 id 被发现两次（例：`opencode.json` 里配了 npm 包，某个项目的 `.opencode/plugins/` 里又放了一份；或本地绝对路径与 npm 包同时留着）。supervisor 保留首个、把后来者标成 `failed`，错误信息是 `Duplicate plugin ID: opencode-providers`。删掉多余的那份即可 |
 | `/connect-providers` 说没有可用供应商 | 注册表没加载成功。看 server 日志里的 `[opencode-providers]`，并确认 `/api/plugin` 里自己那条 `state.status` 是 `active` |
 | `/models` 里看不到新供应商 | 正常：`activation: "auto"`，在 `/connect-providers` 里存过 key 之后才会出现 |
-| 改了插件代码没生效 | 覆盖的是**全局**那份（`~/.config/opencode/plugins/opencode-providers/`）。开发时用 `install.ps1 -Local` / `install.sh --local` 把工作树复制过去 |
+| 改了插件代码没生效 | 改的是**工作树**，但 opencode 加载的是 npm 缓存里那份（`~/.cache/opencode/npm/@justsilver/opencode-providers@…/`）。开发时改用上面的「本地开发：直接跑工作树」把 `plugins` 指到工作树目录 |
 
 验证命令见上面的「开发」小节。

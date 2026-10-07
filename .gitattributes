@@ -1,9 +1,6 @@
 # Auto detect text files and perform LF normalization
 * text=auto
 
-# Shell scripts must keep LF: they are piped to bash (`curl ... | bash`), and CRLF breaks the shebang
-*.sh text eol=lf
-
 # 注册表源文件必须 LF：插件/CLI 对内容做确定性哈希（revision），CRLF 会让同一份数据在
 # Windows 检出上算出与 CI（LF）不同的 revision。
 registry/** text eol=lf

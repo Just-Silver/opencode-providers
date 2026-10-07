@@ -10,7 +10,7 @@ description: Use when adding or changing providers or models in this repository'
 + 顶层共享模型 `registry/models/<lab>/<model>.json`。`index.json` 与 `revision` 由 CLI 自动维护，**人手不碰**。
 插件运行期从 GitHub raw 拉 manifest，按 `revision` 决定要不要重拉各分文件、聚合成一份（6h TTL + `ETag` + 失败沿用旧缓存）。
 **改数据不需要发插件版本**，但要让运行中的实例跟上：`git push origin main` → 触发一次插件重载
-（`install.ps1 -Local` / 重启 / 或在 `/connect-providers` 弹窗里按 `Ctrl+R` 强制刷新），否则最多等 6h。
+（重启 / 或在 `/connect-providers` 弹窗里按 `Ctrl+R` 强制刷新），否则最多等 6h。
 
 ## 铁律 0：禁止 agent 直接读 `registry/**` 任何文件
 
@@ -327,7 +327,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 2. **再写**：`add-provider` / `add-model` / `add-shared-model`（冲突会报错、不会落盘）
 3. **自查**：`node … validate`（组装 + schema + index/目录/revision 一致）+ `node … show <供应商id>`（可选）+ `node --test`（含 CLI 分文件读写/sync/冲突用例）
 4. `git add -A && git commit -m "…"`（**中文**）→ `git push origin main`
-5. 让运行中的实例生效：`pwsh -NoProfile -File .\install.ps1 -Local`（脚本安装）或重启 opencode
+5. 让运行中的实例生效：重启 opencode（或在 `/connect-providers` 里按 `Ctrl+R` 强制刷新）
 6. 验证：
    ```bash
    curl -fsSL https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry/index.json   # 200，且 providers 里含新 id（再按需 curl 子文件）
