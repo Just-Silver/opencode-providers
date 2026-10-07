@@ -192,7 +192,7 @@ registry/
 ## 开发
 
 ```bash
-node --test                        # 纯逻辑单测（Node ≥ 24 原生 TS，无需依赖）
+node --test                        # 纯逻辑单测（Node ≥ 22 原生 TS，无需依赖）
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs validate   # 分文件注册表：组装 + schema + index/revision 一致
 node scripts/smoke-api.mjs --list  # 真机冒烟场景（HTTP，不需要 TUI）
 node scripts/smoke-api.mjs         # 全跑：插件已加载 / 供应商已注册 / 凭据→模型→清理
