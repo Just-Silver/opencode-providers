@@ -12,10 +12,10 @@ description: Use when adding or changing providers or models in this repository'
 **改数据不需要发插件版本**，但要让运行中的实例跟上：`git push origin main` → 触发一次插件重载
 （`install.ps1 -Local` / 重启 / 或在 `/connect-providers` 弹窗里按 `Ctrl+R` 强制刷新），否则最多等 6h。
 
-## 铁律 0：禁止直接读整份注册表
+## 铁律 0：禁止 agent 直接读 `registry/**` 任何文件
 
-它会随供应商/模型增长到很大，读一次就废掉大量上下文。**查、搜、加全部走随技能 CLI**（脚本已经做了 schema 校验与冲突拦截），
-只在需要看某一家/某个模型时用 `show`：
+注册表会随供应商/模型增长到很大，agent 读一次就废掉大量上下文。**查、搜、加、改全部走随技能 CLI**——
+连 `registry/index.json`（manifest）和单个子文件也不要直接读，需要什么就用 `list` / `search` / `show` 拿：
 
 ```bash
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命令> [参数]
@@ -39,7 +39,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
 
 | 路由 | 场景 | 收集项 |
 |---|---|---|
-| **A 新增供应商** | 这家还不存在于注册表 | 供应商 id、显示名称、协议（→ package）、baseURL，**外加首个模型**（key、名称、`modelID`、`limit`、变体） |
+| **A 新增供应商** | 这家还不存在于注册表 | 供应商 id、显示名称、协议（→ package）、baseURL，**外加首个模型**（key、名称、`modelID`、`limit`、变体、输入模态） |
 | **B 给已有供应商加模型** | 供应商已在注册表，只加模型 | 模型 key、显示名称、上游 `modelID`、`limit`、变体 |
 
 > 路由 A 必须带**一个模型**：注册表 schema 要求每个 provider 的 `models` 非空，脚本也据此拒绝空模型。
@@ -73,7 +73,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
     },
     {
       "header": "协议形态",
-      "question": "上游接口走哪种协议形态（看上游文档 curl 示例的路径）？",
+      "question": "上游接口走哪种协议形态（看上游文档 curl 示例的路径）？只说「OpenAI 兼容」而分不清时，一律按默认 chat。",
       "options": [
         { "label": "/v1/chat/completions (默认)", "description": "OpenAI chat → @opencode/ai/providers/openai-compatible" },
         { "label": "/v1/responses", "description": "OpenAI responses → @opencode/ai/providers/openai-compatible/responses" },
@@ -240,8 +240,8 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 
 - `limit` 要写就写全：`--context` 与 `--output` 必须同时给；**都没给又没用 `--base` 会直接报错**（参数不猜）。
 - **能力项必须问过用户再写**：用户选了「图片/音频/…」就用 `--input text,image`（逗号分隔、必须含 `text`）。
-  不写 `--input` 时插件按默认处理（当前默认是纯文本 `["text"]`，即「识别不了图」）——所以要开图片**必须显式写**。
-  工具调用能力**不写**（不在最小配置里，默认继承上游/宿主）。
+  多选问题的 label 是展示名（如「纯文本 (text)」），传给 `--input` 的是**括号里的英文单词**（`text,image`）。
+  只选「纯文本」时可以省略 `--input`（等价于默认 `["text"]`）；要开图片**必须显式写**。
 - `--model-id` 省略（或等于 key）就不写 `modelID`；`--model-name` 省略就不写 `name`（**不会**拿供应商名顶替）。
 - 模型与某个已存在的**顶层共享模型**参数完全一致时，用 `add-model --base <lab>/<model>` 引用，别复制一份（见下节）。
 - `add-provider` 的 `--baseurl` 若已被别家占用会报错，确属有意才加 `--force`。
@@ -254,9 +254,9 @@ CLI **只**接受这些字段并据此写文件，其它一律不给入口：
 - 模型级 → `name`、`modelID`、`limit`（`context`/`output`）、`variants`（`id` + 可选 `settings`）、`base`
 - 模型**能力**（可选，**必须用多选问过用户后再写**）→ `input`（输入模态，逗号分隔、必须含 `text`，如 `["text","image"]`）
 
-**不要** `keyLabel`（默认就是 `Paste API key`）、`settings`、`headers`、`body`、`canonical`、`env`、`apiKey`、
+**严格只写上面这些字段**，其余一律不写：`keyLabel`、`settings`、`headers`、`body`、`canonical`、`env`、`apiKey`、
 `cost`、`tools`、`family`、`status`、`releaseDate`、`disabled`、`reasoningField`、`maxTokensField`。
-（`input` 是**能力事实**，用上面的多选问出来才写；`tools` 不写，默认继承上游。）
+用户没给的值不要自己补；已有条目里的其它字段也不要顺手加/删——**除非用户明确要求增删某个字段**。
 
 - **绝不写 `env` / `apiKey`**：本项目只走 `/connect`，key 存 opencode 自己的凭据表（写进注册表会明文落盘、且绕过 `/connect`）。
 - 已有条目里若带了上述字段（历史遗留），**不要**顺手加/删，保持最小改动。
@@ -310,7 +310,8 @@ CLI **只**接受这些字段并据此写文件，其它一律不给入口：
 # 1) 先建顶层共享模型（只需一次）→ models/<lab>/<model>.json
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-shared-model \
   --lab deepseek --key deepseek-v4.1-flash --model-name "Deepseek V4.1 Flash" \
-  --context 1048576 --output 393216 --variant low --variant high --variant max
+  --context 1048576 --output 393216 \
+  --variant 'low:{"reasoningEffort":"low"}' --variant 'high:{"reasoningEffort":"high"}' --variant 'max:{"reasoningEffort":"max"}'
 
 # 2) 各家供应商用 --base <lab>/<model> 引用（差异用 --model-id 覆盖；不写 limit）
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model \

@@ -23,8 +23,8 @@
  *   node scripts/registry.mjs add-shared-model --lab LAB --key KEY [--model-name 名称] [--context N --output N] [--variant id[:settingsJSON]] [--input text,image,...]
  *
  * 通用：`--root <注册表目录>` 覆盖默认位置；`--json` 输出机器可读结果。
- * 只允许最小字段（供应商：name/package/baseURL；模型：name/modelID/limit/variants/base），
- * 不接受 keyLabel/settings/headers/cost/tools/input/output 等——注册表铁律由脚本强制。
+ * 严格只写最小字段（供应商：name/package/baseURL；模型：name/modelID/limit/variants/base；能力：input），
+ * 其余不写（keyLabel/settings/headers/cost/tools/output…）——注册表铁律由脚本强制。
  */
 
 import { createHash } from "node:crypto"
@@ -73,12 +73,15 @@ function parseArgs(argv) {
       positional.push(arg)
       continue
     }
-    const eq = arg.indexOf("=")
-    if (eq !== -1) {
-      add(arg.slice(2, eq), arg.slice(eq + 1))
+    const eqForm = arg.indexOf("=")
+    if (eqForm !== -1) {
+      const rawKey = arg.slice(2, eqForm)
+      add(rawKey === "base-url" ? "baseurl" : rawKey, arg.slice(eqForm + 1))
       continue
     }
-    const key = arg.slice(2)
+    const rawKey = arg.slice(2)
+    // `--base-url` 是常见写法，作为 `--baseurl` 的别名（拼错/未知参数一律报错，别静默忽略）。
+    const key = rawKey === "base-url" ? "baseurl" : rawKey
     if (BOOLEAN_FLAGS.has(key)) {
       flags[key] = true
       continue
@@ -108,6 +111,17 @@ function required(flags, key, label) {
   const value = lastOf(flags, key)
   if (typeof value !== "string" || value.trim() === "") throw new CliError(`缺少 ${label}（--${key}）`)
   return value
+}
+
+const COMMON_FLAGS = new Set(["json", "help", "root"])
+
+/** 未知参数必须报错——静默忽略会让「拼错的 flag」变成「悄悄少写字段」。 */
+function rejectUnknownFlags(command, flags, allowed) {
+  const known = new Set([...COMMON_FLAGS, ...allowed])
+  for (const key of Object.keys(flags)) {
+    if (known.has(key)) continue
+    throw new CliError(`未知参数 --${key}（命令 ${command}）。允许：--${[...allowed].join(" --")}（通用：--json --root）`)
+  }
 }
 
 function checkId(value, label) {
@@ -397,11 +411,13 @@ function matchesModel(model, query) {
 }
 
 function commandList(flags) {
+  rejectUnknownFlags("list", flags, new Set())
   const registry = parseTree(loadTree(resolveRoot(flags)))
   printList(summarize(registry), flags.json === true)
 }
 
 function commandSearch(positional, flags) {
+  rejectUnknownFlags("search", flags, new Set(["query"]))
   const query = (positional[0] ?? lastOf(flags, "query") ?? "").toLowerCase()
   if (!query) throw new CliError("用法：search <关键词>")
   const all = summarize(parseTree(loadTree(resolveRoot(flags))))
@@ -421,6 +437,7 @@ function commandSearch(positional, flags) {
 }
 
 function commandShow(positional, flags) {
+  rejectUnknownFlags("show", flags, new Set())
   const id = positional[0]
   if (!id) throw new CliError("用法：show <供应商id> [模型key]")
   const tree = loadTree(resolveRoot(flags))
@@ -445,6 +462,7 @@ function commandShow(positional, flags) {
 }
 
 function commandValidate(flags) {
+  rejectUnknownFlags("validate", flags, new Set())
   const root = resolveRoot(flags)
   let tree
   let registry
@@ -490,13 +508,20 @@ function reportFailure(root, problems) {
 // ── 写命令 ──────────────────────────────────────────────────────────────────
 
 function commandSync(flags) {
+  rejectUnknownFlags("sync", flags, new Set())
   const root = resolveRoot(flags)
   const { providers, revision } = syncManifest(root)
   console.log(`✓ 已同步 ${join(root, "index.json")}`)
   console.log(`  providers=[${providers.join(", ")}] · revision=${revision}`)
 }
 
+const ADD_PROVIDER_FLAGS = new Set([
+  "id", "name", "baseurl", "package", "protocol", "model",
+  "model-name", "model-id", "context", "output", "variant", "base", "force", "input",
+])
+
 function commandAddProvider(flags) {
+  rejectUnknownFlags("add-provider", flags, ADD_PROVIDER_FLAGS)
   const root = resolveRoot(flags)
   const tree = loadTree(root)
   const id = checkId(required(flags, "id", "供应商 id"), "供应商 id")
@@ -536,7 +561,12 @@ function commandAddProvider(flags) {
   console.log(`  写入 ${providerDir(root, id)}/ 与 ${join(root, "index.json")}`)
 }
 
+const ADD_MODEL_FLAGS = new Set([
+  "provider", "key", "model-name", "model-id", "context", "output", "variant", "base", "input",
+])
+
 function commandAddModel(flags) {
+  rejectUnknownFlags("add-model", flags, ADD_MODEL_FLAGS)
   const root = resolveRoot(flags)
   const tree = loadTree(root)
   const providerId = checkId(required(flags, "provider", "供应商 id"), "供应商 id")
@@ -569,6 +599,7 @@ function commandAddModel(flags) {
 }
 
 function commandAddSharedModel(flags) {
+  rejectUnknownFlags("add-shared-model", flags, new Set(["lab", "key", "model-name", "context", "output", "variant", "input"]))
   const root = resolveRoot(flags)
   const tree = loadTree(root)
   const lab = checkId(required(flags, "lab", "lab"), "lab")

@@ -221,6 +221,33 @@ test("格式化幂等：sync 两次文件字节不变", () => {
   assert.deepEqual(snapshot(root), before)
 })
 
+test("CLI 健壮性：--base-url 是 --baseurl 的别名；未知参数必须报错而不是静默忽略", () => {
+  const root = freshRoot()
+  const aliased = cli(
+    [
+      "add-provider",
+      "--id", "aliasprov", "--name", "Alias", "--base-url", "https://api.alias.example/v1",
+      "--model", "m", "--context", "1", "--output", "1",
+    ],
+    root,
+  )
+  assert.equal(aliased.status, 0, aliased.stderr)
+  assert.equal(readJson(file(root, "providers", "aliasprov", "provider.json")).baseURL, "https://api.alias.example/v1")
+
+  const unknown = cli(
+    [
+      "add-provider",
+      "--id", "x", "--name", "X", "--baseurl", "https://api.x.example/v1",
+      "--model", "m", "--context", "1", "--output", "1", "--keylabl", "oops",
+    ],
+    root,
+  )
+  assert.equal(unknown.status, 1)
+  assert.match(unknown.stderr, /未知参数 --keylabl/)
+  // 未产出半成品
+  assert.equal(existsSync(file(root, "providers", "x", "provider.json")), false)
+})
+
 test("validate 汇总计数；子文件损坏报错", () => {
   const root = freshRoot()
   cli(["sync"], root)
