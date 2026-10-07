@@ -9,11 +9,11 @@
  *   <root>/index.json                  # manifest（本 CLI 自动维护，人手不碰）
  *   <root>/providers/<id>/provider.json
  *   <root>/providers/<id>/models.json
- *   <root>/models/<lab>/<model>.json   # 顶层共享模型
+ *   <root>/models/<lab>/<model>.json   # 顶层共享模型（`--base` 复用那一层）
  *
  *   node scripts/registry.mjs list [--json]
  *   node scripts/registry.mjs search <关键词> [--json]
- *   node scripts/registry.mjs show <供应商id> [模型key] [--json]
+ *   node scripts/registry.mjs show <供应商id> [模型key] [--json]   # 或 show <lab>/<model> 看共享模型
  *   node scripts/registry.mjs validate
  *   node scripts/registry.mjs sync
  *   node scripts/registry.mjs add-provider --id ID --name 名称 --baseurl URL [--protocol chat] \
@@ -21,14 +21,23 @@
  *   node scripts/registry.mjs add-model --provider ID --key KEY [--model-name 名称] [--model-id 上游id] \
  *        [--context N --output N] [--variant id[:settingsJSON]] [--base lab/model] [--input text,image,...]
  *   node scripts/registry.mjs add-shared-model --lab LAB --key KEY [--model-name 名称] [--context N --output N] [--variant id[:settingsJSON]] [--input text,image,...]
+ *   node scripts/registry.mjs set-provider --id ID [--name 名称] [--baseurl URL | --unset baseurl] [--package PKG | --protocol P]
+ *   node scripts/registry.mjs set-model --provider ID --key KEY [--model-name 名称] [--model-id 上游id] \
+ *        [--context N --output N] [--variant id[:settingsJSON]] [--input text,image,...] [--base lab/model] [--unset 字段]
+ *   node scripts/registry.mjs set-shared-model --lab LAB --key KEY [--model-name 名称] [--context N --output N] \
+ *        [--variant id[:settingsJSON]] [--input text,image,...] [--unset 字段]
+ *   node scripts/registry.mjs remove-provider --id ID
+ *   node scripts/registry.mjs remove-model --provider ID --key KEY
+ *   node scripts/registry.mjs remove-shared-model --ref lab/model   # 或 --lab LAB --key KEY
  *
+ * 更新一律是**字段补丁**：只改传入的 flag，未传字段保持原样；`--unset a,b` 显式清空（可重复给）。
  * 通用：`--root <注册表目录>` 覆盖默认位置；`--json` 输出机器可读结果。
  * 严格只写最小字段（供应商：name/package/baseURL；模型：name/modelID/limit/variants/base；能力：input），
  * 其余不写（keyLabel/settings/headers/cost/tools/output…）——注册表铁律由脚本强制。
  */
 
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
@@ -337,17 +346,146 @@ function buildModelSpec(flags, { key, allowBase }) {
 
   // 输入模态（可选，由技能多选问出来后显式写入）。不写 = 插件按宿主默认推断；tools 同理默认 true。
   const input = lastOf(flags, "input")
-  if (typeof input === "string" && input.trim() !== "") {
-    const values = input
-      .split(",")
-      .map((item) => item.trim())
-      .filter((item) => item !== "")
-    if (values.length === 0) throw new CliError(`--input 不能为空`)
-    for (const value of values) checkId(value, "--input 模态")
-    spec.input = values
+  if (typeof input === "string" && input.trim() !== "") spec.input = parseInputList(input)
+
+  return spec
+}
+
+/** `--input text,image` → `["text","image"]`（逗号分隔，逐项过路径段正则）。 */
+function parseInputList(input) {
+  const values = input
+    .split(",")
+    .map((item) => item.trim())
+    .filter((item) => item !== "")
+  if (values.length === 0) throw new CliError(`--input 不能为空`)
+  for (const value of values) checkId(value, "--input 模态")
+  return values
+}
+
+// ── 字段补丁（set-*） ────────────────────────────────────────────────────────
+
+/** `--unset` 的别名 → 字段名。 */
+const MODEL_UNSET_ALIASES = new Map([
+  ["name", "name"],
+  ["model-name", "name"],
+  ["modelID", "modelID"],
+  ["model-id", "modelID"],
+  ["base", "base"],
+  ["limit", "limit"],
+  ["variants", "variants"],
+  ["input", "input"],
+])
+const SHARED_UNSET_ALIASES = new Map([
+  ["name", "name"],
+  ["model-name", "name"],
+  ["limit", "limit"],
+  ["variants", "variants"],
+  ["input", "input"],
+])
+
+/** 解析 `--unset a,b`（可重复给）；token 必须是已知字段，否则报错。 */
+function parseUnsets(flags, aliases) {
+  const tokens = allOf(flags, "unset")
+    .flatMap((item) => String(item).split(","))
+    .map((item) => item.trim())
+    .filter((item) => item !== "")
+  const fields = new Set()
+  for (const token of tokens) {
+    const field = aliases.get(token)
+    if (!field) throw new CliError(`--unset ${token} 不支持（可选：${[...aliases.keys()].join(", ")}）`)
+    fields.add(field)
+  }
+  return fields
+}
+
+/**
+ * 字段补丁：只改传入的 flag，未传字段保持原样；`--unset` 显式清空。
+ * 不在这里判「limit 缺失」等结构约束——统一交给落盘前的 `parseTree` 兜底。
+ */
+function applyModelPatch(tree, current, flags, { allowBase, allowModelID, aliases, key }) {
+  const unsets = parseUnsets(flags, aliases)
+  const spec = { ...current }
+
+  const name = lastOf(flags, "model-name")
+  if (name !== undefined) {
+    if (typeof name !== "string" || name.trim() === "") throw new CliError(`--model-name 不能为空`)
+    spec.name = name
+  }
+  if (unsets.has("name")) delete spec.name
+
+  if (allowModelID) {
+    const modelId = lastOf(flags, "model-id")
+    if (modelId !== undefined) {
+      if (typeof modelId !== "string" || modelId.trim() === "") throw new CliError(`--model-id 不能为空`)
+      if (modelId === key) delete spec.modelID
+      else spec.modelID = modelId
+    }
+    if (unsets.has("modelID")) delete spec.modelID
+  }
+
+  const context = lastOf(flags, "context")
+  const output = lastOf(flags, "output")
+  if (context !== undefined || output !== undefined) {
+    if (context === undefined || output === undefined) {
+      throw new CliError(`limit 要写就写全：--context 与 --output 必须同时给`)
+    }
+    spec.limit = { context: parsePositiveInt(context, "--context"), output: parsePositiveInt(output, "--output") }
+  }
+  if (unsets.has("limit")) delete spec.limit
+
+  const variants = parseVariants(allOf(flags, "variant"))
+  if (variants) spec.variants = variants
+  if (unsets.has("variants")) delete spec.variants
+
+  const input = lastOf(flags, "input")
+  if (typeof input === "string" && input.trim() !== "") spec.input = parseInputList(input)
+  if (unsets.has("input")) delete spec.input
+
+  if (allowBase) {
+    const base = lastOf(flags, "base")
+    if (base !== undefined) spec.base = requireShared(tree, base)
+    if (unsets.has("base")) delete spec.base
   }
 
   return spec
+}
+
+// ── 重复定义提示（软提示，不拦截） ──────────────────────────────────────────
+
+/** 参与「参数相同」比较的字段（固定顺序 → JSON 串稳定可比较）。 */
+const COMPARABLE_FIELDS = [
+  "name", "family", "releaseDate", "status", "disabled",
+  "limit", "cost", "tools", "input", "output", "reasoningField", "maxTokensField", "variants",
+]
+
+function comparableModel(value) {
+  const out = {}
+  for (const field of COMPARABLE_FIELDS) if (value[field] !== undefined) out[field] = value[field]
+  return JSON.stringify(out)
+}
+
+/** 找到一个与 spec（忽略 `base`/`modelID`）参数完全相同的共享模型引用。 */
+function findIdenticalShared(tree, spec) {
+  if (spec.base !== undefined) return undefined
+  const target = comparableModel(spec)
+  for (const [ref, model] of tree.shared) if (comparableModel(model) === target) return ref
+  return undefined
+}
+
+function reportReuseHint(tree, spec) {
+  const ref = findIdenticalShared(tree, spec)
+  if (ref !== undefined) {
+    console.log(`  ⚠ 提示：共享模型 "${ref}" 参数与刚写入的相同，可改用 --base ${ref} 复用（避免重复定义）`)
+  }
+}
+
+/** 删掉空目录（共享模型删光后残留的 lab 目录）。非空/占用则静默保留。 */
+function removeEmptyDir(dir) {
+  try {
+    if (existsSync(dir) && readdirSync(dir).length === 0) rmdirSync(dir)
+  } catch {
+    /* 非空或占用 → 保留 */
+  }
 }
 
 function resolvePackage(flags) {
@@ -381,15 +519,30 @@ function summarize(registry) {
   }))
 }
 
-function printList(rows, json) {
-  if (json) {
-    console.log(JSON.stringify({ providers: rows }, null, 2))
-    return
+/** 顶层共享模型（可被 `--base` 复用的那一层）+ 谁在引用它。 */
+function summarizeShared(registry) {
+  const usedBy = new Map()
+  for (const [id, provider] of Object.entries(registry.providers)) {
+    for (const spec of Object.values(provider.models ?? {})) {
+      if (!spec.base) continue
+      const list = usedBy.get(spec.base) ?? []
+      list.push(id)
+      usedBy.set(spec.base, list)
+    }
   }
-  if (rows.length === 0) {
-    console.log("（注册表里没有供应商）")
-    return
-  }
+  return Object.entries(registry.models ?? {}).map(([ref, model]) => ({
+    ref,
+    name: model.name,
+    family: model.family,
+    limit: model.limit,
+    variants: (model.variants ?? []).map((variant) => variant.id),
+    input: model.input,
+    usedBy: usedBy.get(ref) ?? [],
+  }))
+}
+
+function printProviders(rows) {
+  if (rows.length === 0) return
   console.log(`${rows.length} 个供应商：\n`)
   for (const row of rows) {
     console.log(`${row.id} (${row.name}) · ${row.package} · ${row.baseURL ?? "(无 baseURL)"} · ${row.models.length} 个模型`)
@@ -404,8 +557,41 @@ function printList(rows, json) {
   }
 }
 
+function printSharedModels(rows) {
+  if (rows.length === 0) return
+  console.log(`顶层共享模型（${rows.length}）——新增模型命中这里时可用 --base 复用：\n`)
+  for (const row of rows) {
+    const parts = []
+    if (row.name) parts.push(`(${row.name})`)
+    if (row.limit) parts.push(`ctx=${row.limit.context} out=${row.limit.output}`)
+    if (row.variants.length) parts.push(`variants=${row.variants.join(",")}`)
+    if (row.usedBy.length) parts.push(`← ${row.usedBy.join(", ")}`)
+    console.log(`  ${row.ref}  ${parts.join("  ")}`)
+  }
+  console.log("")
+}
+
+function printResult(providers, shared, json) {
+  if (json) {
+    console.log(JSON.stringify({ providers, sharedModels: shared }, null, 2))
+    return
+  }
+  if (providers.length === 0 && shared.length === 0) {
+    console.log("（注册表里没有供应商，也没有顶层共享模型）")
+    return
+  }
+  printProviders(providers)
+  printSharedModels(shared)
+}
+
 function matchesModel(model, query) {
   return [model.key, model.modelID, model.name]
+    .filter(Boolean)
+    .some((field) => String(field).toLowerCase().includes(query))
+}
+
+function matchesShared(row, query) {
+  return [row.ref, row.name, row.family]
     .filter(Boolean)
     .some((field) => String(field).toLowerCase().includes(query))
 }
@@ -413,34 +599,47 @@ function matchesModel(model, query) {
 function commandList(flags) {
   rejectUnknownFlags("list", flags, new Set())
   const registry = parseTree(loadTree(resolveRoot(flags)))
-  printList(summarize(registry), flags.json === true)
+  printResult(summarize(registry), summarizeShared(registry), flags.json === true)
 }
 
 function commandSearch(positional, flags) {
   rejectUnknownFlags("search", flags, new Set(["query"]))
   const query = (positional[0] ?? lastOf(flags, "query") ?? "").toLowerCase()
   if (!query) throw new CliError("用法：search <关键词>")
-  const all = summarize(parseTree(loadTree(resolveRoot(flags))))
+  const registry = parseTree(loadTree(resolveRoot(flags)))
+  const shared = summarizeShared(registry).filter((row) => matchesShared(row, query))
   const rows = []
-  for (const row of all) {
+  for (const row of summarize(registry)) {
     const providerHit = row.id.toLowerCase().includes(query) || String(row.name).toLowerCase().includes(query)
     const models = providerHit ? row.models : row.models.filter((model) => matchesModel(model, query))
     if (providerHit || models.length > 0) rows.push({ ...row, models })
   }
-  if (rows.length === 0) {
-    if (flags.json === true) console.log(JSON.stringify({ providers: [] }, null, 2))
-    else console.log(`没有匹配 "${positional[0] ?? query}" 的供应商或模型`)
+  if (rows.length === 0 && shared.length === 0) {
+    if (flags.json === true) console.log(JSON.stringify({ providers: [], sharedModels: [] }, null, 2))
+    else console.log(`没有匹配 "${positional[0] ?? query}" 的供应商、模型或共享模型`)
     process.exitCode = 1
     return
   }
-  printList(rows, flags.json === true)
+  printResult(rows, shared, flags.json === true)
 }
 
 function commandShow(positional, flags) {
   rejectUnknownFlags("show", flags, new Set())
   const id = positional[0]
-  if (!id) throw new CliError("用法：show <供应商id> [模型key]")
+  if (!id) throw new CliError("用法：show <供应商id> [模型key]（或 show <lab>/<model> 看顶层共享模型）")
   const tree = loadTree(resolveRoot(flags))
+  // 供应商 id 不含 `/`；含 `/` 的一律按 `<lab>/<model>` 解析成共享模型引用。
+  if (id.includes("/")) {
+    const ref = checkBaseRef(id)
+    const model = tree.shared.get(ref)
+    if (!model) {
+      console.error(`✗ 共享模型 "${ref}" 不存在（现有：${[...tree.shared.keys()].join(", ") || "无"}）`)
+      process.exitCode = 1
+      return
+    }
+    console.log(JSON.stringify(model, null, 2))
+    return
+  }
   const entry = tree.providers.find((item) => item.id === id)
   if (!entry) {
     console.error(`✗ 供应商 "${id}" 不存在`)
@@ -559,6 +758,7 @@ function commandAddProvider(flags) {
 
   console.log(`✓ 已添加供应商 "${id}"（${name}，${packageName}，1 个模型：${modelKey}）`)
   console.log(`  写入 ${providerDir(root, id)}/ 与 ${join(root, "index.json")}`)
+  reportReuseHint(tree, spec)
 }
 
 const ADD_MODEL_FLAGS = new Set([
@@ -596,6 +796,7 @@ function commandAddModel(flags) {
 
   console.log(`✓ 已给供应商 "${providerId}" 添加模型 "${key}"`)
   console.log(`  写入 ${providerDir(root, providerId)}/models.json 与 ${join(root, "index.json")}`)
+  reportReuseHint(tree, spec)
 }
 
 function commandAddSharedModel(flags) {
@@ -617,6 +818,327 @@ function commandAddSharedModel(flags) {
 
   console.log(`✓ 已添加共享模型 "${ref}"（用 add-model --base ${ref} 让供应商引用）`)
   console.log(`  写入 ${sharedModelPath(root, ref)} 与 ${join(root, "index.json")}`)
+}
+
+const SET_PROVIDER_FLAGS = new Set(["id", "name", "baseurl", "package", "protocol", "unset", "force"])
+
+function commandSetProvider(flags) {
+  rejectUnknownFlags("set-provider", flags, SET_PROVIDER_FLAGS)
+  const root = resolveRoot(flags)
+  const tree = loadTree(root)
+  const id = checkId(required(flags, "id", "供应商 id"), "供应商 id")
+  const entry = tree.providers.find((item) => item.id === id)
+  if (!entry) throw new CliError(`供应商 "${id}" 不存在（现有：${tree.providers.map((item) => item.id).join(", ")}）`)
+
+  const unsets = parseUnsets(flags, new Map([["baseurl", "baseurl"], ["base-url", "baseurl"]]))
+  const provider = { ...entry.provider }
+
+  const name = lastOf(flags, "name")
+  if (name !== undefined) {
+    if (typeof name !== "string" || name.trim() === "") throw new CliError(`--name 不能为空`)
+    provider.name = name
+  }
+  if (lastOf(flags, "package") !== undefined || lastOf(flags, "protocol") !== undefined) {
+    provider.package = resolvePackage(flags)
+  }
+  const baseURL = lastOf(flags, "baseurl")
+  if (baseURL !== undefined) {
+    if (!/^https?:\/\/\S+$/i.test(String(baseURL))) throw new CliError(`--baseurl "${baseURL}" 不是合法的 http(s) URL`)
+    if (flags.force !== true) {
+      const clash = tree.providers.find((item) => item.id !== id && item.provider.baseURL === baseURL)
+      if (clash) throw new CliError(`baseURL "${baseURL}" 已被供应商 "${clash.id}" 使用（加 --force 可强制）`)
+    }
+    provider.baseURL = baseURL
+  }
+  if (unsets.has("baseurl")) delete provider.baseURL
+
+  const providers = tree.providers.map((item) => (item.id === id ? { id, provider, models: item.models } : item))
+  parseTree({ ...tree, providers })
+
+  writeJsonFile(join(providerDir(root, id), "provider.json"), provider)
+  syncManifest(root)
+  console.log(`✓ 已更新供应商 "${id}"（${provider.name}）`)
+  console.log(`  写入 ${providerDir(root, id)}/provider.json 与 ${join(root, "index.json")}`)
+}
+
+const SET_MODEL_FLAGS = new Set([
+  "provider", "key", "model-name", "model-id", "context", "output", "variant", "base", "input", "unset",
+])
+
+function commandSetModel(flags) {
+  rejectUnknownFlags("set-model", flags, SET_MODEL_FLAGS)
+  const root = resolveRoot(flags)
+  const tree = loadTree(root)
+  const providerId = checkId(required(flags, "provider", "供应商 id"), "供应商 id")
+  const entry = tree.providers.find((item) => item.id === providerId)
+  if (!entry) throw new CliError(`供应商 "${providerId}" 不存在（现有：${tree.providers.map((item) => item.id).join(", ")}）`)
+  const key = checkId(required(flags, "key", "模型 key"), "模型 key")
+  const current = entry.models[key]
+  if (!current) throw new CliError(`供应商 "${providerId}" 下没有模型 "${key}"（现有：${Object.keys(entry.models).join(", ") || "无"}）`)
+
+  const spec = applyModelPatch(tree, current, flags, {
+    allowBase: true,
+    allowModelID: true,
+    aliases: MODEL_UNSET_ALIASES,
+    key,
+  })
+  const nextModels = { ...entry.models, [key]: spec }
+  const providers = tree.providers.map((item) =>
+    item.id === providerId ? { id: item.id, provider: item.provider, models: nextModels } : item,
+  )
+  parseTree({ ...tree, providers })
+
+  writeJsonFile(join(providerDir(root, providerId), "models.json"), nextModels)
+  syncManifest(root)
+  console.log(`✓ 已更新供应商 "${providerId}" 的模型 "${key}"`)
+  console.log(`  写入 ${providerDir(root, providerId)}/models.json 与 ${join(root, "index.json")}`)
+}
+
+const SET_SHARED_FLAGS = new Set(["lab", "key", "model-name", "context", "output", "variant", "input", "unset"])
+
+function commandSetSharedModel(flags) {
+  rejectUnknownFlags("set-shared-model", flags, SET_SHARED_FLAGS)
+  const root = resolveRoot(flags)
+  const tree = loadTree(root)
+  const lab = checkId(required(flags, "lab", "lab"), "lab")
+  const key = checkId(required(flags, "key", "共享模型 key"), "共享模型 key")
+  const ref = `${lab}/${key}`
+  const current = tree.shared.get(ref)
+  if (!current) throw new CliError(`共享模型 "${ref}" 不存在（现有：${[...tree.shared.keys()].join(", ") || "无"}）`)
+
+  const spec = applyModelPatch(tree, current, flags, {
+    allowBase: false,
+    allowModelID: false,
+    aliases: SHARED_UNSET_ALIASES,
+    key,
+  })
+  const shared = new Map(tree.shared)
+  shared.set(ref, spec)
+  parseTree({ ...tree, shared })
+
+  writeJsonFile(sharedModelPath(root, ref), spec)
+  syncManifest(root)
+  const used = tree.providers
+    .filter((item) => Object.values(item.models).some((model) => model.base === ref))
+    .map((item) => item.id)
+  console.log(`✓ 已更新共享模型 "${ref}"`)
+  if (used.length > 0) console.log(`  ⚠ 改动对引用它的供应商同时生效：${used.join(", ")}`)
+  console.log(`  写入 ${sharedModelPath(root, ref)} 与 ${join(root, "index.json")}`)
+}
+
+function commandRemoveProvider(flags) {
+  rejectUnknownFlags("remove-provider", flags, new Set(["id"]))
+  const root = resolveRoot(flags)
+  const tree = loadTree(root)
+  const id = checkId(required(flags, "id", "供应商 id"), "供应商 id")
+  const entry = tree.providers.find((item) => item.id === id)
+  if (!entry) throw new CliError(`供应商 "${id}" 不存在（现有：${tree.providers.map((item) => item.id).join(", ")}）`)
+  if (tree.providers.length === 1) {
+    throw new CliError(`"${id}" 是唯一的供应商；删掉会让注册表没有供应商（schema 不允许）`)
+  }
+
+  const providers = tree.providers.filter((item) => item.id !== id)
+  parseTree({ ...tree, providers })
+
+  rmSync(providerDir(root, id), { recursive: true, force: true })
+  syncManifest(root)
+  console.log(`✓ 已删除供应商 "${id}"（${entry.provider.name}，${Object.keys(entry.models).length} 个模型）`)
+  console.log(`  删除 ${providerDir(root, id)}/ 并重写 ${join(root, "index.json")}`)
+
+  const orphans = [...tree.shared.keys()].filter(
+    (ref) => !providers.some((item) => Object.values(item.models).some((model) => model.base === ref)),
+  )
+  if (orphans.length > 0) {
+    console.log(`  提示：以下共享模型已无人引用（可保留，或用 remove-shared-model 删除）：${orphans.join(", ")}`)
+  }
+}
+
+function commandRemoveModel(flags) {
+  rejectUnknownFlags("remove-model", flags, new Set(["provider", "key"]))
+  const root = resolveRoot(flags)
+  const tree = loadTree(root)
+  const providerId = checkId(required(flags, "provider", "供应商 id"), "供应商 id")
+  const entry = tree.providers.find((item) => item.id === providerId)
+  if (!entry) throw new CliError(`供应商 "${providerId}" 不存在（现有：${tree.providers.map((item) => item.id).join(", ")}）`)
+  const key = checkId(required(flags, "key", "模型 key"), "模型 key")
+  if (!entry.models[key]) {
+    throw new CliError(`供应商 "${providerId}" 下没有模型 "${key}"（现有：${Object.keys(entry.models).join(", ") || "无"}）`)
+  }
+  if (Object.keys(entry.models).length === 1) {
+    throw new CliError(
+      `"${key}" 是供应商 "${providerId}" 唯一的模型；删掉会让它变空（schema 不允许）。要删整家请用 remove-provider --id ${providerId}`,
+    )
+  }
+
+  const nextModels = { ...entry.models }
+  delete nextModels[key]
+  const providers = tree.providers.map((item) =>
+    item.id === providerId ? { id: item.id, provider: item.provider, models: nextModels } : item,
+  )
+  parseTree({ ...tree, providers })
+
+  writeJsonFile(join(providerDir(root, providerId), "models.json"), nextModels)
+  syncManifest(root)
+  console.log(`✓ 已从供应商 "${providerId}" 删除模型 "${key}"`)
+  console.log(`  写入 ${providerDir(root, providerId)}/models.json 与 ${join(root, "index.json")}`)
+}
+
+function commandRemoveSharedModel(flags) {
+  rejectUnknownFlags("remove-shared-model", flags, new Set(["ref", "lab", "key"]))
+  const root = resolveRoot(flags)
+  const tree = loadTree(root)
+  const rawRef = lastOf(flags, "ref")
+  const ref = checkBaseRef(
+    typeof rawRef === "string" && rawRef.trim() !== ""
+      ? rawRef
+      : `${checkId(required(flags, "lab", "lab"), "lab")}/${checkId(required(flags, "key", "共享模型 key"), "共享模型 key")}`,
+  )
+  if (!tree.shared.has(ref)) {
+    throw new CliError(`共享模型 "${ref}" 不存在（现有：${[...tree.shared.keys()].join(", ") || "无"}）`)
+  }
+
+  // 悬空引用会让引用它的供应商在插件里被整家跳过 —— 先挡住，避免制造坏数据。
+  const referrers = []
+  for (const entry of tree.providers) {
+    for (const [key, spec] of Object.entries(entry.models)) {
+      if (spec.base === ref) referrers.push(`${entry.id}/${key}`)
+    }
+  }
+  if (referrers.length > 0) {
+    throw new CliError(
+      `共享模型 "${ref}" 仍被引用：${referrers.join(", ")}。\n` +
+        `  先用 set-model --provider <id> --key <key> --unset base（或 remove-model）解除引用，再删——否则会留下未知 base`,
+    )
+  }
+
+  const shared = new Map(tree.shared)
+  shared.delete(ref)
+  parseTree({ ...tree, shared })
+
+  const path = sharedModelPath(root, ref)
+  rmSync(path, { force: true })
+  removeEmptyDir(dirname(path))
+  syncManifest(root)
+  console.log(`✓ 已删除共享模型 "${ref}"`)
+  console.log(`  删除 ${path} 并重写 ${join(root, "index.json")}`)
+}
+
+// ── 检查（check） ───────────────────────────────────────────────────────────
+
+function commandCheck(flags) {
+  rejectUnknownFlags("check", flags, new Set(["strict"]))
+  const root = resolveRoot(flags)
+  let tree
+  try {
+    tree = loadTree(root)
+  } catch (error) {
+    if (error instanceof CliError) {
+      reportFailure(root, [error.message])
+      return
+    }
+    throw error
+  }
+
+  const errors = []
+  const warnings = []
+
+  // 1) 分文件能否聚合 + 过 schema（含 base 引用、字段合法性等）
+  const parsed = parseRegistry(assemble(tree))
+  if (!parsed.ok) errors.push(...parsed.errors)
+
+  // 2) manifest / 目录 / revision 一致
+  const dirs = providerDirs(root)
+  const inIndex = [...tree.manifest.providers].sort()
+  if (JSON.stringify(inIndex) !== JSON.stringify(dirs)) {
+    errors.push(`index.json 的 providers 与目录不一致：index=[${inIndex.join(", ")}] 目录=[${dirs.join(", ")}]`)
+  }
+  const expected = computeRevision(root)
+  if (expected !== tree.manifest.revision) {
+    errors.push(`revision 不一致：index=${tree.manifest.revision} 实际=${expected}（跑一次 sync 修正）`)
+  }
+
+  // 3) 共享模型引用完整性：悬空=error、孤儿=warn
+  const referrers = new Map()
+  for (const entry of tree.providers) {
+    for (const [key, spec] of Object.entries(entry.models)) {
+      if (spec.base === undefined) continue
+      const list = referrers.get(spec.base) ?? []
+      list.push(`${entry.id}/${key}`)
+      referrers.set(spec.base, list)
+    }
+  }
+  for (const [ref, users] of referrers) {
+    if (!tree.shared.has(ref)) {
+      errors.push(`悬空引用：共享模型 "${ref}" 不存在，却被 ${users.join(", ")} 引用（该家会被运行期整家跳过）`)
+    }
+  }
+  for (const ref of tree.shared.keys()) {
+    if (!referrers.has(ref)) warnings.push(`未被引用的共享模型 "${ref}"（可保留，或用 remove-shared-model 删除）`)
+  }
+
+  // 4) 内联模型与某共享模型参数完全相同 → 建议改用 base 复用
+  for (const entry of tree.providers) {
+    for (const [key, spec] of Object.entries(entry.models)) {
+      if (spec.base !== undefined) continue
+      const ref = findIdenticalShared(tree, spec)
+      if (ref !== undefined) {
+        warnings.push(`providers/${entry.id}/models.json 的 "${key}" 与共享模型 "${ref}" 参数相同，建议改用 base 复用`)
+      }
+    }
+  }
+
+  // 5) baseURL 重复
+  const byUrl = new Map()
+  for (const entry of tree.providers) {
+    const url = entry.provider.baseURL
+    if (typeof url !== "string" || url === "") continue
+    const list = byUrl.get(url) ?? []
+    list.push(entry.id)
+    byUrl.set(url, list)
+  }
+  for (const [url, ids] of byUrl) {
+    if (ids.length > 1) warnings.push(`baseURL "${url}" 被多家使用：${ids.join(", ")}`)
+  }
+
+  // 6) 输入模态：写了 input 却不含 text
+  const checkInput = (where, input) => {
+    if (Array.isArray(input) && !input.includes("text")) warnings.push(`${where} 的 input 不含 "text"：${input.join(",")}`)
+  }
+  for (const entry of tree.providers) {
+    for (const [key, spec] of Object.entries(entry.models)) {
+      checkInput(`providers/${entry.id}/models.json 的 "${key}"`, spec.input)
+    }
+  }
+  for (const [ref, model] of tree.shared) checkInput(`共享模型 "${ref}"`, model.input)
+
+  // 7) 空 lab 目录残留
+  const modelsRoot = join(root, "models")
+  if (existsSync(modelsRoot)) {
+    for (const entry of readdirSync(modelsRoot, { withFileTypes: true })) {
+      if (entry.isDirectory() && readdirSync(join(modelsRoot, entry.name)).length === 0) {
+        warnings.push(`空目录残留：models/${entry.name}/（无文件）`)
+      }
+    }
+  }
+
+  const modelCount = tree.providers.reduce((sum, entry) => sum + Object.keys(entry.models).length, 0)
+  if (errors.length > 0) {
+    console.error(`✗ ${root} 检查失败：`)
+    for (const problem of errors) console.error(`  - ${problem}`)
+    for (const problem of warnings) console.error(`  ⚠ ${problem}`)
+    process.exitCode = 1
+    return
+  }
+  console.log(`✓ ${root} 检查通过`)
+  console.log(`  供应商=${tree.providers.length} · 模型=${modelCount} · 顶层共享模型=${tree.shared.size} · revision=${tree.manifest.revision}`)
+  if (warnings.length > 0) {
+    console.log(`  ${warnings.length} 条提醒：`)
+    for (const problem of warnings) console.log(`  ⚠ ${problem}`)
+    if (flags.strict === true) {
+      console.error(`✗ --strict：${warnings.length} 条提醒视为失败`)
+      process.exitCode = 1
+    }
+  }
 }
 
 // ── 入口 ────────────────────────────────────────────────────────────────────

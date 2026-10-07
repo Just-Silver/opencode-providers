@@ -75,6 +75,10 @@
   `publishConfig.provenance`（会让本地人工发布失败）。前提是 npm 侧登记过 trust 关系，**且包必须已经存在**
   → 因此 `0.1.0-beta.0` 这一步需要**人工首发一次**（`npm login` + `npm publish --tag next`），之后才交给 CD。
 - trust 关系里的 **Workflow filename 必须与 `release.yml` 同名**（改名要同步改 npm 侧），`Environment` 留空要两边一致。
+- **发布后 tarball 有传播延迟**：`npm publish` 成功会打印
+  `npm notice Your package is being processed and may take a few minutes to become available.`。此时 packument
+  （版本 / dist-tag / `integrity`）已可见，但 tarball URL 仍 **404**，`opencode plugin update` 会报
+  `NpmInstallFailedError ... 404 .../opencode-providers-<v>.tgz`。**等几分钟重试即可**（实测约 3 分钟后 tarball 变 200），不是发布失败。
 
 ## 4. 测试
 
