@@ -326,7 +326,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs remove-sh
 
 要点：
 
-- `limit` 要写就写全：`--context` 与 `--output` 必须同时给；**都没给又没用 `--base` 会直接报错**（参数不猜）。
+- `limit` 要写就写全：`--context` 与 `--output` 必须同时给（`set-*` 同理——想只改 `output` 也要把 `--context` 带上原值）；**都没给又没用 `--base` 会直接报错**（参数不猜）。
 - **能力项必须问过用户再写**：用户选了「图片/音频/…」就用 `--input text,image`（逗号分隔、必须含 `text`）。
   多选问题的 label 是展示名（如「纯文本 (text)」），传给 `--input` 的是**括号里的英文单词**（`text,image`）。
   只选「纯文本」时可以省略 `--input`（等价于默认 `["text"]`）；要开图片**必须显式写**。
