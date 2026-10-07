@@ -243,6 +243,62 @@ OpenCode 内部已有两种现成做法，可直接照抄：
 - **失败保留上次清单**，不要清空（`ollama.ts:112-117` 的 `cached` 逻辑）。
 - **冷启动兜底**：自带一份精简兜底清单（内核是打包 `packages/core/src/models-dev/snapshot.txt`）。
 
+### 本插件的注册表缓存：位置 / TTL / 何时重拉（实测）
+
+**位置**：opencode 的全局 SQLite 表 `kv`，文件 `~/.local/share/opencode/opencode.db`（`opencode debug paths db`）。
+插件通过 `ctx.storage` 读写，宿主机把键加上命名空间前缀 `plugin:<插件 id 每个字符的 utf-16 hex>:`
+（`packages/core/src/plugin/host.ts:602-628`；跨 location 共享，TUI/server 两个进程读同一行）。
+
+- 键名 = `plugin:…:registry-cache:<注册表 URL>` → **每个 URL 一份缓存**；换 URL 等价于无缓存 = 立刻重拉
+  （这是故意设计，见 `plugin/opencode-providers/index.ts:62-63`）
+- 值 = `{ etag, fetchedAt, body }`（`registry/source.ts:19-23`），`body` 是**原始 JSON 文本**（不是解析结果）
+
+**TTL = 6 小时**（`registry/source.ts:16` `DEFAULT_TTL_MS = 6 * 60 * 60 * 1000`；HTTP 超时 10s `:17`）。
+
+> **关键：没有后台定时器。** `loadRegistry()` 只在插件 `setup()` 时执行一次 —— 所谓"重拉"发生在**插件被(重新)加载**
+> 的时刻：opencode 启动、插件安装/换版本、配置变化（文件监视热重载）、显式重启服务。
+> 6h 是「加载那一刻判断缓存是否太旧」的阈值，不是轮询周期；没重启就一直用手里那份（进程内已注册的也不变）。
+
+`loadRegistry` 里**不直接返回缓存、而去发网络请求**的情况，只有这几种：
+
+| 条件 | 结果 |
+|---|---|
+| ① 没有缓存（首次安装 / 换 URL / 手工删了那行） | 走网络 |
+| ② 缓存 `fetchedAt` 距今 ≥ 6h | 走网络 |
+| ③ 缓存 body 解析失败（JSON 坏 / `schemaVersion` 不匹配或字段不合法） | 走网络（别用坏数据） |
+| ④ 缓存新鲜 | **零网络**，直接用（`source: "cache"`） |
+
+网络请求的结果分支（都实测过）：
+
+- `200` → 写新 `etag`+`fetchedAt`+`body`，`source: "network"`；
+- `304` → 用缓存 body，但**顺延 `fetchedAt` 再管 6h**（所以服务端没改内容时永不重下）
+- 非 2xx / 超时 / 网络错误 → **沿用旧缓存**（`source: "stale-cache"`，并 warn 一句）；**一条缓存都没有**时 setup
+  只 `console.error` 后 `return` → 插件 `active` 但注册 **0 条**（见上文）
+- 200 但 body 解析失败 → 同上先试旧缓存
+
+**想立刻重拉**（不等 6h/不重启）任选其一：重启 `opencode service restart`；把 `registryUrl` 换成新地址（键不同）；
+或直接删掉对应 kv 行。**注意注册表数据改动本身是 URL 不变的**，所以不会自动跳过 TTL。
+
+**观测**：`console.*` 不进日志（上文），直接读 DB 最准（Node ≥ 22.5 自带 `node:sqlite`，只读打开）：
+
+```bash
+node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.env.USERPROFILE+'\\.local\\share\\opencode\\opencode.db',{readOnly:true});const ns='plugin:'+[...'opencode-providers'].map(c=>c.charCodeAt(0).toString(16).padStart(4,'0')).join('')+':';for(const r of db.prepare('SELECT key,value FROM kv WHERE key LIKE ?').all(ns+'%')){const v=JSON.parse(r.value);console.log(r.key.slice(ns.length),'|',new Date(v.fetchedAt).toISOString(),'|',v.etag)}"
+```
+
+本机实测（2026-10-07）输出，可见**三条**（前两条是死行，见下）：
+
+```
+registry-cache                                                                          | 2026-10-06T21:55:38.569Z | W/"6d15..."
+registry-cache:http://127.0.0.1:45999/registry.json                                      | 2026-10-06T23:40:21.142Z | "probe"
+registry-cache:https://raw.githubusercontent.com/Just-Silver/opencode-providers/main/registry/registry.json | 2026-10-06T23:40:55.419Z | W/"8638..."
+```
+
+- 第 1 条无 URL 后缀 = **早期版本（键里还没有 URL 那版）留下的死行**，0.1.0 只读带 URL 的键，永不再用；
+- 第 2 条是「探针注册表法」留下的死行（见下节），同样不会被读；
+- 第 3 条才是当前生效的（内容 = `command-code` / `r4-coder`）。
+  这两条死行无害（每次 setup 只多一次 `kv.get`），想清可直接 `DELETE FROM kv WHERE key LIKE '<ns>%' AND instr(key, '/') = 0` 之类；
+  **但别在有进程运行时手工写库** —— 那正是本节开头提到的只读观测更安全的原因。
+
 ## 凭据存哪 / 怎么注入（不需要插件动手）
 
 **存储**：opencode 的 SQLite 表 `credential`（`packages/core/src/credential/sql.ts:5-14`），

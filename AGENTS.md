@@ -44,7 +44,9 @@
 - **凭据不归本项目管**：key 存 opencode 自己的 SQLite；注入靠 `provider.integrationID === integration.id`
 - **命令名 `/connect-providers`**：独立命名，不与内置 `/connect` 冲突（同名会并列出现两行，属未定义行为）
 - 注册表用 `schemaVersion` 解耦：改注册表**不需要**发插件版本；不匹配的版本整份拒绝
-- 拉取：默认 6h TTL + `ETag` + 失败沿用旧缓存（`ctx.storage`，按插件 ID 全局命名空间，跨 location 共享）
+- 拉取：默认 6h TTL + `ETag` + 失败沿用旧缓存。缓存落在 `ctx.storage`（= 全局 `opencode.db` 的 `kv` 表，宿主给键加
+  `plugin:<id 的 hex>:` 前缀，跨 location 共享）；**键含 URL**（`registry-cache:<url>`），换地址即刻重拉；
+  **没有后台定时器** —— 只在插件 `setup()`（= opencode 启动 / 安装换版本 / 配置变更热重载 / 重启）时判定一次 TTL
 - 参数写全，不许猜：`limit`/`cost`/`tools`/模态/`compatibility`/`variants` 都由注册表给出
 
 # 发版
