@@ -1,6 +1,6 @@
 ---
 name: opencode-providers registry
-description: Use when adding or changing providers or models in this repository's registry (registry/index.json manifest + registry/providers/<id>/{provider,models}.json + registry/models/<lab>/<model>.json) — 新增供应商（id / 显示名 / 协议包 / baseURL）、给某家加模型（modelID / limit / 变体）、**复用已有共享模型（新增前先 search，命中就 --base）**、改参数（set-*）、删除（remove-*），或用户说「维护注册表 / 把某家加进去 / 加个模型 / 改模型删模型」。改用随技能 CLI（.opencode/skills/opencode-providers-registry/scripts/registry.mjs），**不要直接读整份注册表**。
+description: Use when adding or changing providers or models in this repository's registry (registry/index.json manifest + registry/providers/<id>/{provider,models}.json + registry/models/<lab>/<model>.json) — 新增供应商（id / 显示名 / 协议包 / baseURL）、给某家加模型（**必须声明来源：--lab 建家族 canon / --base 复用 / --inline 本家独有**；modelID / limit / 变体）、**复用已有共享模型（新增前先 search，命中就 --base）**、改参数（set-*）、删除（remove-*），或用户说「维护注册表 / 把某家加进去 / 加个模型 / 改模型删模型」。改用随技能 CLI（.opencode/skills/opencode-providers-registry/scripts/registry.mjs），**不要直接读整份注册表**。
 ---
 
 # 注册表维护（分文件 + manifest）
@@ -36,16 +36,16 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
 | `search <关键词> [--json]` | 按供应商 id/名称、模型 key/名称/`modelID`、**共享模型 ref/名称** 搜索（新增前必跑） |
 | `show <供应商id> [模型key]` / `show <lab>/<model>` | 只看一家/一个模型/一个共享模型的 JSON（不读整份文件） |
 | `validate` | 组装 + schema + `index.json`/目录/`revision` 一致性 |
-| `check [--strict]` | 更全的体检：**悬空 `base` 引用（会害插件整家跳过）**、孤儿共享模型、内联重复、baseURL 重复、`input` 缺 text、空目录；`--strict` 时提醒也算失败 |
+| `check [--strict]` | 更全的体检：**悬空 `base` 引用（会害插件整家跳过）**、孤儿共享模型、内联重复、**参数完全相同的两个 canon（重复家族）**、baseURL 重复、`input` 缺 text、空目录；`--strict` 时提醒也算失败 |
 | `sync` | 重算 `revision` 并重写 `index.json`（手改过子文件后跑它） |
-| `add-provider …` / `add-model …` / `add-shared-model …` | 新增（冲突直接报错） |
+| `add-provider …` / `add-model …`（**必带来源 `--lab` / `--base` / `--inline`**）/ `add-shared-model …` | 新增（冲突直接报错） |
 | `set-provider …` / `set-model …` / `set-shared-model …` | 改参数：**字段补丁**（只改传入的，未传保持）+ `--unset a,b` 清空 |
-| `remove-provider …` / `remove-model …` / `remove-shared-model …` | 删除（见「路由」里的安全约束） |
+| `remove-provider …` / `remove-model …` / `remove-shared-model …` | 删除（见「路由」里的安全约束）；删后**自动清理无人引用的 canon** |
 
 只看不写先跑 `list`；**新增/改之前先 `search`**。**所有写命令在落盘前都会重跑 `parseRegistry`，冲突/非法一律退出码 1 且不写文件。**
 （调试/演练可用 `--root <注册表目录>` 指向一份副本，不动仓库里的注册表。）
 
-## 铁律 1：新增模型前先 `search`，命中共享模型就复用（路线 C）
+## 铁律 1：新增模型前先 `search`；再定「来源三选一」（路线 C / lab）
 
 **每次新增模型前先搜一次**（新供应商的首个模型、给已有供应商加模型都一样）：
 
@@ -53,21 +53,39 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<模型 key / 显示名 / 上游 modelID>"
 ```
 
-- 输出里「**顶层共享模型**」一节就是可复用候选（= `registry/models/<lab>/<model>.json`）。
-- **命中 → 路线 C**：用 `question` 让用户确认复用哪一个（选项 = 命中项、推荐置顶），选中即 `add-*/--base <lab>/<model>`，
-  **不再问 limit / 名称 / 变体 / 输入模态**（都来自共享模型；只有上游 id 不同才用 `--model-id` 覆盖）。
-- **命中内联模型**（只写在某家 `providers/<id>/models.json`、没进 `models/`）→ `--base` 用不了，先提升为共享再引用：
-  `show <id> <key>` 拿到参数 → `add-shared-model`（照抄那些参数）→ 给新家 `add-*/--base <lab>/<model>`；
+输出里「**顶层共享模型**」一节就是可复用候选（= `registry/models/<lab>/<model>.json`）。据命中情况分三种，
+**`add-provider` / `add-model` 必须显式声明来源，三者必居其一**（不给就报错）：
+
+| 情况 | 来源标志 | 说明 |
+|---|---|---|
+| 命中**共享模型** | `--base <lab>/<model>` | 路线 C：直接复用，**不再问** limit / 名称 / 变体 / 模态；只有上游 id 不同才 `--model-id` 覆盖 |
+| **没命中**，且能说出**造它的 lab** | `--lab <lab>` | **建家族 canon** `models/<lab>/<model>.json`，参数写进 canon；provider 只写 `base`（+ 可选 `--model-id`） |
+| **没命中**，且**本家独有**（私有 beta / 微调 / 无可归属 lab） | `--inline` | 内联写在本供应商里；**必须自带 `--context`/`--output`** |
+
+- **判据是「能不能说出造它的 lab」，不是「有几家在卖」**：**独家代理 ≠ 本家独有**。转售网关卖的第三方模型**要建 canon**。
+- **没命中时，必须用 `question` 问用户「家族标签（lab）」**（见模板）——**不许自己编 lab，也不许默认内联**。用户若在任务里已说清归属（如「这是智谱的模型」）即视为已答；**没给出又无法交互（子代理 / CI）时，把要问的问题写清楚并暂停，别猜**。
+- `--lab-key <name>` 让 canon 文件名与 provider 的 key 不同（省略则同名）；canon 已存在同名时 CLI 报错并提示改用 `--base`。
+- **`--lab` 撞已存在的 canon 会报错**（报错信息提示改用 `--base`），照做即可；`--base` 指向不存在的 canon 也会报错；
+  `--lab`/`--base`/`--inline` **只能给一个**。
+- 命中**别家内联模型**（只写在某家 `providers/<id>/models.json`、没进 `models/`）→ `--base` 用不了：`show <id> <key>`
+  拿到参数、判断它其实属于哪个 lab → 用 `add-shared-model`（或 `add-model --lab`）建 canon，再让新家 `--base` 引用；
   想顺手把**源** provider 也改成引用，用 `set-model --provider <id> --key <key> --base <lab>/<model> --unset name,limit,variants,input`（清掉内联重复字段）。
-- **没命中 → 路线 A/B**，照下面的问题模板逐项问。
-- **绝不自动加 `--base`**：复用与否由用户在提问里点选，技能不拿默认值替用户决定。
+- **limit 是「差异」不是「来源」**：`--base` 时给 `--context/--output` = **写在该 provider 层**（覆盖，如被限流的小额度），canon **不动**；
+  `--lab` 时给 limit 才是写进 canon。
+- **绝不默认内联**：旧规则「单家独有就内联」已废止——「只有一家在卖」不是内联理由。
+
+> **红线（新增模型时，逐条对照）**：
+> ① **不许自己编 lab**——没命中就问用户「家族标签（lab）」；
+> ② **不许拿「只有一家卖」当内联理由**（独家代理 ≠ 本家独有）；
+> ③ **不许跳过 `question` 直接替用户拍板** `--inline` 或 `--lab`；
+> ④ **不许手改 `registry/**`**（连 `index.json` 也不行）。
 
 ## 路由
 
 | 路由 | 场景 | 收集项 |
 |---|---|---|
-| **A 新增供应商** | 这家还不存在于注册表 | 供应商 id、显示名称、协议（→ package）、baseURL，**外加首个模型** |
-| **B 给已有供应商加模型** | 供应商已在注册表，只加模型 | 模型 key、显示名称、上游 `modelID`、`limit`、变体 |
+| **A 新增供应商** | 这家还不存在于注册表 | 供应商 id、显示名称、协议（→ package）、baseURL，**外加首个模型（含来源三选一：家族标签 lab）** |
+| **B 给已有供应商加模型** | 供应商已在注册表，只加模型 | 模型 key、显示名称、**来源三选一（家族标签 lab / `--base` / `--inline`）**、上游 `modelID`、`limit`、变体 |
 | **C 复用已有共享模型** | 「铁律 1」的 `search` 命中顶层共享模型 | 供应商信息（仅 A）+ 模型 key + 用哪个共享模型 + 可选 `modelID` 覆盖 |
 | **改** | 改供应商/模型/共享模型参数 | 用 `set-*`（字段补丁 + `--unset`） |
 | **删** | 删供应商/模型/共享模型 | 用 `remove-*`（安全约束见下） |
@@ -144,6 +162,14 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
       ]
     },
     {
+      "header": "家族标签（lab）",
+      "question": "这个模型归属的 lab（家族标签）id 是什么？（决定 canon 落在 models/<lab>/<model>.json；没有可归属的 lab 就选「本家独有」）",
+      "options": [
+        { "label": "本家独有（--inline）", "description": "私有 beta / 微调 / 说不出来源 lab —— 内联写在本供应商里（必须自带 limit）" },
+        { "label": "新建 lab，请 Type your own 填 lab id", "description": "如 kimi、deepseek；小写字母/数字/._-，不含 / 。建 models/<lab>/<model>.json 家族 canon" }
+      ]
+    },
+    {
       "header": "上游 modelID",
       "question": "发给上游的真实 model id 是什么？",
       "options": [
@@ -210,6 +236,14 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
       ]
     },
     {
+      "header": "家族标签（lab）",
+      "question": "这个模型归属的 lab（家族标签）id 是什么？（决定 canon 落在 models/<lab>/<model>.json；没有可归属的 lab 就选「本家独有」）",
+      "options": [
+        { "label": "本家独有（--inline）", "description": "私有 beta / 微调 / 说不出来源 lab —— 内联写在本供应商里（必须自带 limit）" },
+        { "label": "新建 lab，请 Type your own 填 lab id", "description": "如 kimi、deepseek；小写字母/数字/._-，不含 / 。建 models/<lab>/<model>.json 家族 canon" }
+      ]
+    },
+    {
       "header": "上游 modelID",
       "question": "发给上游的真实 model id 是什么？",
       "options": [
@@ -269,7 +303,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
       "options": [
         { "label": "复用 <lab>/<model> (推荐)", "description": "只写 base 引用；只有上游 id 不同才用 --model-id 覆盖；不再问 limit/变体/模态" },
         { "label": "复用 <另一个命中的 lab/model>", "description": "search 命中的每一项各列一条；没有第二个就删掉这条" },
-        { "label": "不复用，按普通参数新增", "description": "回到路线 A/B 逐项问 limit/变体/模态" }
+        { "label": "不复用，按来源三选一新增", "description": "回到路线 A/B：先问家族标签（--lab / --inline），再问 limit/变体/模态" }
       ]
     }
   ]
@@ -277,8 +311,8 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 ```
 
 - 用户点「复用 X」→ `add-provider`/`add-model` 加 `--base X`（需要时再补 `--model-id`）；**不再发 A/B 的模型参数问题**。
-- 用户点「不复用」→ 回到 A/B 模板。
-- 命中是**内联模型**（非共享）时，问题里改成「提升为共享再复用」，命令走 `add-shared-model` 再 `add-*/--base`。
+- 用户点「不复用」→ 回到 A/B 模板（先问「家族标签（lab）」）。
+- 命中是**别家内联模型**（非共享）时：提示用户「该模型可能该提升为 canon，再让两家都 `--base` 引用」；命令走 `add-shared-model`（或 `add-model --lab`）再 `add-*/--base`。
 
 ## 用 CLI 写（路由 A / B / C）
 
@@ -288,18 +322,24 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-provider \
   --id open-design --name "Open Design" \
   --baseurl https://api.open-design.ai/v1 --protocol chat \
-  --model open-design-chat --model-name "Open Design Chat" \
+  --model open-design-chat --lab open-design --model-name "Open Design Chat" \
   --model-id open-design-chat-v1 \
   --context 131072 --output 32768 \
   --variant 'low:{"reasoningEffort":"low"}' --variant 'high:{"reasoningEffort":"high"}'
 ```
 
-路由 B —— 给已有供应商加模型：
+路由 B —— 给已有供应商加模型（`--lab` 建 canon；**没命中又要内联时用 `--inline`**）：
 
 ```bash
+# --lab：name / limit / 变体 / --input 都写进 canon；provider 层只写 base（+ 可选 modelID）
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model \
-  --provider r4-coder --key r4-mini --model-name "R4 Mini" \
+  --provider r4-coder --key r4-mini --lab r4 --model-name "R4 Mini" \
   --context 64000 --output 8000
+
+# 本家独有（说不出来源 lab）：--inline（必须自带 limit）
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model \
+  --provider r4-coder --key r4-private --inline --model-name "R4 Private" \
+  --context 32000 --output 4000
 ```
 
 路由 C —— `search` 命中共享模型，直接复用（不重复写 limit/变体）：
@@ -326,12 +366,13 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs remove-sh
 
 要点：
 
+- **`add-model` / `add-provider` 必须声明来源**：`--lab <lab>`（建 canon）/ `--base <lab>/<model>`（复用）/ `--inline`（本家独有）——三者必居其一，不给就报错。`--lab-key` 可让 canon 的文件名与 provider 的 key 不同（省略则同名）。
 - `limit` 要写就写全：`--context` 与 `--output` 必须同时给（`set-*` 同理——想只改 `output` 也要把 `--context` 带上原值）；**都没给又没用 `--base` 会直接报错**（参数不猜）。
 - **能力项必须问过用户再写**：用户选了「图片/音频/…」就用 `--input text,image`（逗号分隔、必须含 `text`）。
   多选问题的 label 是展示名（如「纯文本 (text)」），传给 `--input` 的是**括号里的英文单词**（`text,image`）。
   只选「纯文本」时可以省略 `--input`（等价于默认 `["text"]`）；要开图片**必须显式写**。
 - `--model-id` 省略（或等于 key）就不写 `modelID`；`--model-name` 省略就不写 `name`（**不会**拿供应商名顶替）。
-- 模型与某个已存在的**顶层共享模型**参数一致时，用 `add-*/--base <lab>/<model>` 引用（铁律 1 / 路线 C），别复制一份；CLI 在参数完全相同时还会打一行软提示。
+- 模型与某个已存在的**顶层共享模型**参数一致时，用 `add-*/--base <lab>/<model>` 引用（铁律 1 / 路线 C），别复制一份；`--inline` 写入且参数与某 canon 相同时，CLI 会打一行「可改用 `--base` 复用」的软提示。
 - `add-provider` 的 `--baseurl` 若已被别家占用会报错，确属有意才加 `--force`。
 
 ## 铁律：只用最小字段（由 CLI 强制）
@@ -408,12 +449,12 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
   --model-id deepseek/deepseek-v4.1-flash
 ```
 
-单家独有、不与别家共用的模型，一律**内联**写在它自己的 `models` 里（`add-model` 默认行为），不要为了"统一"硬抽到顶层。
+**能说出造它的 lab 的模型，一律 `--lab` 建 canon**（不等复用）；只有**本家独有 / 无可归属 lab** 才 `--inline` 内联。别把「只有一家在卖」当内联理由——**独家代理 ≠ 本家独有**。
 
 ## 步骤（每次改完都要走完）
 
-1. **先查（含搜共享模型）**：`node … search "<模型 key / 名称 / 上游 modelID>"` —— 先看有没有可复用的共享模型，据此定路由 A/B/C；并核对现有参数
-2. **再写**：`add-provider` / `add-model` / `add-shared-model`（C 就补 `--base`）；改/删用 `set-*` / `remove-*`（冲突/非法会报错、不会落盘）
+1. **先查（含搜共享模型）**：`node … search "<模型 key / 名称 / 上游 modelID>"` —— 命中共享模型走 C（`--base`）；没命中就问「家族标签（lab）」，据此定 `--lab` / `--inline`；并核对现有参数
+2. **再写**：`add-provider` / `add-model`（**必带来源：`--lab` / `--base` / `--inline`**）/ `add-shared-model`；改/删用 `set-*` / `remove-*`（冲突/非法会报错、不会落盘；删除会自动清理无人引用的 canon）
 3. **自查**：`node … check`（悬空引用/孤儿/重复…）→ `node … validate`（组装 + schema + index/目录/revision 一致）→ `node --test`
 4. `git add -A && git commit -m "…"`（**中文**）→ `git push origin main`
 5. 让运行中的实例生效：重启 opencode（或在 `/connect-providers` 里按 `Ctrl+R` 强制刷新）
@@ -423,6 +464,8 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
    opencode api get /api/integration   # 新供应商出现，且 metadata.source=opencode-providers
    opencode api get /api/model         # 在 /connect-providers 粘 key 后，模型数与 limit/modelID 对得上
    ```
+
+> **只是在副本上演练时**（所有命令都带 `--root <副本目录>`）：跳过上面的 `node --test`（它跑的是**仓库**注册表，对副本无意义）、`git commit/push`、触发重载与 curl/opencode 验证——副本不参与运行期；演练完删掉副本，别留在机器上。
 
 ## 常见错误
 
@@ -441,3 +484,8 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 | `check --strict` 退出码 1 | 有提醒（孤儿共享模型/内联重复/baseURL 重复/`input` 缺 text/空目录）；`--strict` 时提醒也算失败，按提示处理或去掉 `--strict` |
 | CLI 报「未通过 schema 校验」 | 参数组合非法（如 `--base` 指向不存在的共享模型）；按提示改参数重跑（写命令落盘前就校验，失败不写文件） |
 | `validate` 报错但运行期照常 | CLI 是**源码级全量严校验**（连没人引用的共享模型也校验），运行期是**逐家宽松**（坏的那家只跳过、其余照常）；按 CLI 提示修好即可 |
+| `add-*` 报「必须指定模型来源」 | 没给 `--lab` / `--base` / `--inline`（铁律 1 三选一）；**别默认内联** |
+| `add-*` 报「…已存在，请改用 --base …」 | `--lab` 指向的 canon 已存在；改用 `--base <lab>/<model>` 复用 |
+| `add-*` 报「只能给一个」 | `--lab` / `--base` / `--inline` 同时给了；只留一个 |
+| 共享模型「说没就没了」 | 删除最后一个引用者时 CLI **自动清理**了无人引用的 canon（并清空空 lab 目录）；要留就别先删引用方 |
+| `check` 提醒「参数完全相同的共享模型」 | 两个 canon 参数一模一样（可能重复家族）；确认后 `remove-shared-model` 删其一 |
