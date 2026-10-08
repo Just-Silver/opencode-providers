@@ -1,5 +1,7 @@
 # lab 模型层（canon / provider 两层 + 三选一）Implementation Plan
 
+> **历史冻结**：本次改动的实现计划，已执行完毕（`0.3.2`），只读、不回填、不当现状。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 让注册表的 CLI 强制走「lab 模型层」——`add-model`/`add-provider` 必须显式声明模型来源（`--lab` 建 canon / `--base` 复用 / `--inline` 本家独有），并自动维护 canon（建、清、体检）。
