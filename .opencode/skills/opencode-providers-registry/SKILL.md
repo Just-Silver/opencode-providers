@@ -80,6 +80,16 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 > ③ **不许跳过 `question` 直接替用户拍板** `--inline` 或 `--lab`；
 > ④ **不许手改 `registry/**`**（连 `index.json` 也不行）。
 
+### 反合理化（源自本技能的压力测试）
+
+| 你会对自己说的话 | 事实 |
+|---|---|
+| 「只有我们一家卖，内联就行」 | **独家代理 ≠ 本家独有**；能说出 lab 就 `--lab` 建 canon |
+| 「用户很急，先内联回头再说」 | 一条 `--lab` 命令就收口，省不了步骤；**急 ≠ 可以跳过 `question`** |
+| 「lab 不好定，我自己编一个」 | 不许编；没命中就问用户，**问了才算** |
+| 「用户没提 lab，那就默认内联」 | 默认内联已废止；没给且无法交互 → **停下提问** |
+| 「这是供应商自家的模型，所以内联」 | provider 就是 lab 时 lab 仍说得出来 → 仍 `--lab`（canon 归 lab，不归 provider） |
+
 ## 路由
 
 | 路由 | 场景 | 收集项 |
