@@ -566,6 +566,20 @@ test("check：无孤儿时全绿；孤儿共享模型=提醒、--strict 失败�
   assert.match(bad.stderr, /悬空引用/)
 })
 
+test("check：两个 canon 参数完全相同 → 提醒（重复家族）", () => {
+  const root = freshRoot()
+  const lab = freshLab(root)
+  const base = readJson(file(root, "models", "anchor", "base-model.json"))
+  assert.equal(
+    cli(["add-shared-model", "--lab", lab, "--key", "dup", "--model-name", base.name,
+         "--context", String(base.limit.context), "--output", String(base.limit.output)], root).status,
+    0,
+  )
+  const warn = cli(["check"], root)
+  assert.equal(warn.status, 0, warn.stderr)
+  assert.match(warn.stdout, /参数完全相同的共享模型/)
+})
+
 test("set-model：字段补丁 + --unset 清空；非法 --unset 报错", () => {
   const root = freshRoot()
   const set = cli(

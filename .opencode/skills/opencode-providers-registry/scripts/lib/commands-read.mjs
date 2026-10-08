@@ -8,7 +8,7 @@ import { join } from "node:path"
 import { parseRegistry } from "../../../../../plugin/opencode-providers/registry/schema.ts"
 import { CliError, checkBaseRef, lastOf, rejectUnknownFlags } from "./cli.mjs"
 import { assemble, computeRevision, loadTree, parseTree, providerDirs, resolveRoot } from "./store.mjs"
-import { findIdenticalShared } from "./spec.mjs"
+import { comparableFields, findIdenticalShared, sameValue } from "./spec.mjs"
 import { matchesModel, matchesShared, printResult, reportFailure, summarize, summarizeShared } from "./report.mjs"
 
 export function commandList(flags) {
@@ -172,6 +172,16 @@ export function commandCheck(flags) {
       const ref = findIdenticalShared(tree, spec)
       if (ref !== undefined) {
         warnings.push(`providers/${entry.id}/models.json 的 "${key}" 与共享模型 "${ref}" 参数相同，建议改用 base 复用`)
+      }
+    }
+  }
+
+  // 4b) 两个 canon 参数完全相同 → 可能是重复家族
+  const sharedComparables = [...tree.shared].map(([ref, model]) => [ref, comparableFields(model)])
+  for (let i = 0; i < sharedComparables.length; i += 1) {
+    for (let j = i + 1; j < sharedComparables.length; j += 1) {
+      if (sameValue(sharedComparables[i][1], sharedComparables[j][1])) {
+        warnings.push(`参数完全相同的共享模型："${sharedComparables[i][0]}" 与 "${sharedComparables[j][0]}"（可能重复家族；确认后删其一）`)
       }
     }
   }

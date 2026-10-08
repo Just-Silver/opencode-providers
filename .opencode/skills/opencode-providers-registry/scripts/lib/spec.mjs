@@ -224,13 +224,13 @@ const COMPARABLE_FIELDS = [
   "limit", "cost", "tools", "input", "output", "reasoningField", "maxTokensField", "variants",
 ]
 
-function comparableFields(value) {
+export function comparableFields(value) {
   const out = {}
   for (const field of COMPARABLE_FIELDS) if (value[field] !== undefined) out[field] = value[field]
   return out
 }
 
-const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+export const sameValue = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
 /**
  * 找到一个「参数相同」的共享模型引用：内联模型**已写的字段**都要在共享模型里对得上
