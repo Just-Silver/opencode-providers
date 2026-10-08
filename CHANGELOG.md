@@ -7,6 +7,18 @@
 
 ## [Unreleased]
 
+## [0.3.2-beta.1] - 2026-10-08
+
+### Fixed
+
+- **强制刷新未携带 location → 模型列表不更新（真正的根因）**：provider / model 注册**按 location 隔离**
+  （同一个 `/api/model` 按请求目录返回不同结果）。`doRefresh` 调 RPC 时没传 location，于是只刷到服务端
+  **默认目录**（`/api/location` 返回的那个），用户所在目录的注册一直停在旧状态 —— 现象是「默认目录下
+  `/api/model` 有新模型、模型选择器里没有」。改为 RPC 调用**带上当前 location**（`{ location: { directory } }`），
+  刷新与随之发出的事件都落在用户所在目录。
+  另：客户端刷新后同时失效并重取 `integration` / `model` / `provider`（`reloadCatalog`），不再只刷 integration。
+  （`0.3.2-beta.0` 只做了后者，**未修好**。）
+
 ## [0.3.2-beta.0] - 2026-10-08
 
 ### Added
@@ -29,15 +41,10 @@
 
 ### Fixed
 
-- **`/connect-providers` 强制刷新后模型 / 供应商列表不更新**：刷新成功只失效了 `integration` 列表，
-  而 TUI 的模型选择器读的是 `ctx.data.location.model`，它**只被 `model.updated` 事件**驱动失效。
-  服务端那条链（`Provider` → `Model` → `model.updated`）只从 `Integration.Event.Updated` / 凭据事件起跳，
-  所以**给已有供应商加模型**时（integration 集合没变）链路不发 → 选择器一直显示旧模型
-  （新增一家供应商才正常，故只在「已有供应商加模型」时暴露）。
-  改为刷新后由客户端主动失效并重取 **`integration` / `model` / `provider` 三件套**（`reloadCatalog`），
-  不再依赖事件链。证据：`packages/core/src/provider.ts`（`Provider.notify` 只订阅 Integration/Credential）、
-  `packages/core/src/model.ts`（订阅 `Provider.Event.Updated` 后发 `model.updated`）、
-  `packages/tui/src/context/data.ts`（`model.updated` → 失效重取 `location.model`）
+- **`/connect-providers` 强制刷新后模型 / 供应商列表不更新**（**仅部分修复**）：刷新成功只失效了 `integration` 列表，
+  改为同时失效并重取 **`integration` / `model` / `provider`** 三件套（`reloadCatalog`）。
+  ⚠️ **本版没真正修好**：真根因是 RPC 未携带 location（见 `0.3.2-beta.1`）。
+  本版残留的错误结论是「服务端事件链不发 `model.updated`」——实测该事件**会发**，但事件带的是被调用的那个 location。
 
 ## [0.3.1] - 2026-10-07
 
