@@ -121,6 +121,10 @@
   **provider/model 注册是按 location 隔离的**，不带 location 的 RPC 只刷服务端的**默认目录**（`/api/location` 返回的那个），
   用户所在目录的注册一直停在旧状态。现象：`/api/model`（默认目录）里有新模型、选择器里没有。
   排查口径：**按自己所在目录的 location 调 `/api/model`**，与默认目录逐一对比 —— **两边模型数不同就是这个**。
+  **删除方向同理**：注册表里移除的模型**不会自动消失**——拉取式、无推送，且 `setup()` 之外不主动重载，所以某 location 会一直
+  显示旧模型，直到它重载 / 强制刷新（Ctrl+R）或重启；重载时 `provider.reload()` 按干净注册表重建（内核 `editor.add` 是**整条替换**，
+  `packages/core/src/provider.ts:323-329`），已删模型随之消失。**每个 location 独立**：默认目录干净 ≠ 你所在目录干净；
+  2026-10-08 实测：探针模型只在「探针时期加载过」的那个 location 残留，对该 location 刷新即清。
   客户端刷新后还要**主动失效并重取 `integration`/`model`/`provider` 三件套**（`reloadCatalog`），不能只刷 integration。
   注：服务端事件链**是通的**（`provider.updated` / `model.updated` 都会发），但**事件带的是被调用的那个 location**，
   所以关键是 location 对齐，而不是等事件（2026-10-08 实测纠正过一次错误结论：曾误判为「事件链不发」）
