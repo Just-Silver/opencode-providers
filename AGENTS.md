@@ -117,6 +117,11 @@
   但 provider 的 `activation` 与 `settings.apiKey` 仍是配置那份（`enabled` + 明文 env key）⇒ 模型无凭据也可见、`auto` 语义失效。
   要完全走注册表就删掉配置里那一块；只想用 `{env:…}` 就别写进注册表 —— 同 id 两边只留一边
 - 换注册表 URL / 删注册表条目后要**触发一次重载**才生效（改文件、重装、重启）；URL 404 时插件沿用旧缓存，但**新 key 无缓存时 setup 会直接 return**（插件 active 却注册 0 条）
+- **插件「代码」更新后：服务端入口会热重载，但 TUI 入口不会**——TUI 入口（`tui.ts` / `view/**`）是 **TUI 进程启动时**加载的，
+  npm 包换版本**不会**在运行中的 TUI 里把它换掉。所以改了 TUI 侧代码，**必须完全重启 opencode** 才生效
+  （`/api/plugin` 报的 `version` 是**服务端**那份，别拿它判断 TUI 侧跑的是哪个版本）。
+  2026-10-08 实测：`0.3.2` 的服务端入口已热重载（`/api/plugin` 报 0.3.2），但 TUI 仍跑 `0.3.1` 的 `doRefresh`（`refresh({})`，不带 location）
+  → Ctrl+R 一直刷到服务端默认目录、用户目录不更新；**完全重启 opencode 后** TUI 换到 0.3.2，Ctrl+R 立刻落到用户目录（探针出现/消失均可复现）
 - **强制刷新必须带当前 location**（`view/connect.ts` 的 `doRefresh` 传 `{ location: { directory } }`）：
   **provider/model 注册是按 location 隔离的**，不带 location 的 RPC 只刷服务端的**默认目录**（`/api/location` 返回的那个），
   用户所在目录的注册一直停在旧状态。现象：`/api/model`（默认目录）里有新模型、选择器里没有。
