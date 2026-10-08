@@ -110,6 +110,16 @@ test("commit --message：覆盖自动提交信息", () => {
   assert.equal(git(dir, ["log", "-1", "--format=%s"]), "自定义提交信息")
 })
 
+test("commit -m：短别名等价于 --message（不被当成位置参数静默忽略）", () => {
+  const dir = freshGitRepo()
+  const root = join(dir, "registry")
+  addProvider(root)
+
+  const result = cli(["commit", "-m", "短别名提交信息"], root)
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(git(dir, ["log", "-1", "--format=%s"]), "短别名提交信息")
+})
+
 test("commit：不在 git 仓库里时报错", () => {
   const dir = mkdtempSync(join(tmpdir(), "opencode-registry-nogit-"))
   cpSync(SHIPPED_ROOT, join(dir, "registry"), { recursive: true })

@@ -13,6 +13,9 @@ export const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 /** 只吃 `--flag`（不带值）的布尔开关；`--strict` 仅 `check` 用。 */
 const BOOLEAN_FLAGS = new Set(["json", "force", "help", "strict", "inline", "push"])
 
+/** 少数短别名（`commit -m` 是 git 肌肉记忆）；不映射的话会被当位置参数**静默忽略**。 */
+const SHORT_ALIASES = { "-m": "--message" }
+
 export function parseArgs(argv) {
   const positional = []
   const flags = {}
@@ -21,7 +24,7 @@ export function parseArgs(argv) {
     else flags[key] = value
   }
   for (let index = 0; index < argv.length; index += 1) {
-    const arg = argv[index]
+    const arg = SHORT_ALIASES[argv[index]] ?? argv[index]
     if (!arg.startsWith("--")) {
       positional.push(arg)
       continue
