@@ -1,22 +1,67 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import test from "node:test"
 import { fileURLToPath } from "node:url"
+
+import { registryView, escapeRe, need } from "./helpers/shipped.ts"
+import { syncManifest } from "../.opencode/skills/opencode-providers-registry/scripts/lib/store.mjs"
 
 const CLI = fileURLToPath(
   new URL("../.opencode/skills/opencode-providers-registry/scripts/registry.mjs", import.meta.url),
 )
 const SHIPPED_ROOT = fileURLToPath(new URL("../registry", import.meta.url))
 
-/** 每次复制一份随仓 registry 目录树，写坏也不污染仓库。 */
+/** 随仓注册表视图（只读）：所有期望值都从它推导。 */
+const shipped = registryView(SHIPPED_ROOT)
+
+/** 锚点供应商：固定的测试操作对象，与随仓数据无关。 */
+const ANCHOR_ID = "zz-anchor"
+const ANCHOR_BASE_ONLY = "anchor-shared"
+const ANCHOR_OVERRIDE = "anchor-override"
+const ANCHOR_INLINE = "anchor-inline"
+const ANCHOR_BASE = "anchor/base-model"
+const ANCHOR_LIMIT = { context: 1000, output: 100 }
+const ANCHOR_BASE_LIMIT = { context: 500, output: 50 }
+const ANCHOR_URL = "https://api.zz-anchor.test/v1"
+
+/**
+ * 复制一份随仓 registry 目录树，再补上一个**锚点供应商**，写坏也不污染仓库。
+ *
+ * 锚点保证测试永远有稳定的操作对象（「只写 base 的模型」「覆盖 modelID 的模型」「内联模型」、
+ * 一条顶层共享模型、一个占用的 baseURL），因此**新增/删除随仓供应商、模型、共享模型时
+ * 本文件不需要改一行**。
+ */
 function freshRoot(): string {
   const dir = mkdtempSync(join(tmpdir(), "opencode-registry-"))
   const root = join(dir, "registry")
   cpSync(SHIPPED_ROOT, root, { recursive: true })
+  seedAnchors(root)
   return root
+}
+
+/** 只往临时副本里写锚点，不碰随仓注册表。 */
+function seedAnchors(root: string) {
+  const write = (rel: string, value: unknown) =>
+    writeFileSync(join(root, ...rel.split("/")), `${JSON.stringify(value, null, 2)}\n`)
+
+  mkdirSync(join(root, "providers", ANCHOR_ID), { recursive: true })
+  mkdirSync(join(root, "models", "anchor"), { recursive: true })
+  write("providers/zz-anchor/provider.json", {
+    name: "ZZ Anchor",
+    package: "@opencode/ai/providers/openai-compatible",
+    baseURL: ANCHOR_URL,
+  })
+  write("providers/zz-anchor/models.json", {
+    [ANCHOR_BASE_ONLY]: { base: ANCHOR_BASE },
+    [ANCHOR_OVERRIDE]: { base: ANCHOR_BASE, modelID: "upstream/anchor" },
+    [ANCHOR_INLINE]: { name: "Anchor Inline", limit: ANCHOR_LIMIT },
+  })
+  write("models/anchor/base-model.json", { name: "Anchor Base", limit: ANCHOR_BASE_LIMIT })
+  // 用 CLI 自己的 sync 重算 revision + 重写 providers 列表（单一事实源，不另写一份算法）
+  syncManifest(root)
 }
 
 function cli(args: readonly string[], root: string) {
@@ -45,32 +90,45 @@ function snapshot(root: string): Record<string, string> {
 
 /** 从注册表目录推导 validate 的汇总计数，新增供应商/模型不需要改测试。 */
 function registryCounts(root: string) {
-  const providerIds = readdirSync(file(root, "providers"), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-  const models = providerIds.reduce(
-    (total, id) => total + Object.keys(readJson(file(root, "providers", id, "models.json"))).length,
-    0,
-  )
-  const shared = walk(file(root, "models")).filter((rel) => rel.endsWith(".json")).length
-  return { providers: providerIds.length, models, shared }
+  const view = registryView(root)
+  return { providers: view.ids().length, models: view.modelCount(), shared: view.sharedCount() }
 }
 
 test("list 打印供应商与模型，不吐整份 JSON", () => {
   const root = freshRoot()
+  const view = registryView(root)
   const result = cli(["list"], root)
   assert.equal(result.status, 0, result.stderr)
-  assert.match(result.stdout, /command-code \(Command Code\)/)
-  assert.match(result.stdout, /r4-coder \(R4 Coder\)/)
-  assert.match(result.stdout, /- deepseek-v4\.1-flash\s+→ deepseek\/deepseek-v4\.1-flash/)
+
+  // 每一家都要出现，且带上 id / name / 包 / 模型数
+  for (const id of view.ids()) {
+    const provider = view.provider(id)
+    assert.match(result.stdout, new RegExp(escapeRe(`${id} (${provider.name})`)))
+    assert.match(result.stdout, new RegExp(escapeRe(`${view.keys(id).length} 个模型`)))
+  }
+  // 带 base 的模型行渲染成 `key → modelID … base=…`
+  const based = need(view.basedModels()[0], "一个引用了顶层共享模型的模型")
+  assert.match(
+    result.stdout,
+    new RegExp(`- ${escapeRe(based.key)}\\s+→ ${escapeRe(based.spec.modelID ?? based.key)}`),
+  )
+  assert.match(result.stdout, new RegExp(escapeRe(`base=${based.spec.base}`)))
+  // 顶层共享模型也列出来
+  for (const ref of view.sharedRefs()) assert.match(result.stdout, new RegExp(escapeRe(ref)))
 })
 
 test("search 命中供应商名/模型 key；未命中退出码 1", () => {
   const root = freshRoot()
-  const hit = cli(["search", "R4"], root)
+  const view = registryView(root)
+  const id = need(view.ids()[0], "至少一家供应商")
+
+  const hit = cli(["search", id], root)
   assert.equal(hit.status, 0, hit.stderr)
-  assert.match(hit.stdout, /r4-coder/)
-  assert.doesNotMatch(hit.stdout, /command-code/)
+  assert.match(hit.stdout, new RegExp(escapeRe(id)))
+
+  const byModel = cli(["search", view.keys(id)[0]!], root)
+  assert.equal(byModel.status, 0, byModel.stderr)
+  assert.match(byModel.stdout, new RegExp(escapeRe(id)))
 
   const miss = cli(["search", "does-not-exist"], root)
   assert.equal(miss.status, 1)
@@ -79,14 +137,33 @@ test("search 命中供应商名/模型 key；未命中退出码 1", () => {
 
 test("show 单看一个供应商/模型；不存在报错", () => {
   const root = freshRoot()
-  const provider = cli(["show", "r4-coder"], root)
+  const view = registryView(root)
+  const id = need(view.ids()[0], "至少一家供应商")
+
+  const provider = cli(["show", id], root)
   assert.equal(provider.status, 0, provider.stderr)
   assert.match(provider.stdout, /"models"/)
-  assert.doesNotMatch(provider.stdout, /command-code/)
+  // 只看一家：别的供应商不出现在结果里
+  for (const other of view.ids().filter((candidate) => candidate !== id)) {
+    assert.doesNotMatch(provider.stdout, new RegExp(`"${escapeRe(other)}"\\s*:`))
+  }
 
-  const model = cli(["show", "command-code", "deepseek-v4.1-flash"], root)
+  // 覆盖了上游 modelID 的模型：show 要原样打印
+  const override = need(view.modelWithModelIDOverride(), "一个覆盖了 modelID 的模型")
+  const model = cli(["show", override.id, override.key], root)
   assert.equal(model.status, 0, model.stderr)
-  assert.match(model.stdout, /"modelID": "deepseek\/deepseek-v4\.1-flash"/)
+  assert.match(model.stdout, new RegExp(`"modelID": "${escapeRe(override.modelID)}"`))
+
+  // 内联模型：show 要打印内联 limit
+  const inline = cli(["show", ANCHOR_ID, ANCHOR_INLINE], root)
+  assert.equal(inline.status, 0, inline.stderr)
+  assert.match(inline.stdout, new RegExp(`"context": ${ANCHOR_LIMIT.context}`))
+
+  // 顶层共享模型也能按 <lab>/<model> 看
+  const ref = need(view.sharedRefs()[0], "至少一条顶层共享模型")
+  const sharedModel = cli(["show", ref], root)
+  assert.equal(sharedModel.status, 0, sharedModel.stderr)
+  assert.match(sharedModel.stdout, /"limit"/)
 
   const missing = cli(["show", "nope"], root)
   assert.equal(missing.status, 1)
@@ -139,15 +216,15 @@ test("add-provider 建分文件、index 追加 id、revision 改变、validate �
 test("重复 add-provider id / 重复 add-model key → 退出码 1 且文件不变", () => {
   const root = freshRoot()
   const indexBefore = readFileSync(file(root, "index.json"), "utf8")
-  const dup = cli(["add-provider", "--id", "r4-coder", "--name", "X", "--model", "m", "--context", "1", "--output", "1"], root)
+  const dup = cli(["add-provider", "--id", ANCHOR_ID, "--name", "X", "--model", "m", "--context", "1", "--output", "1"], root)
   assert.equal(dup.status, 1)
   assert.match(dup.stderr, /已存在/)
   assert.equal(readFileSync(file(root, "index.json"), "utf8"), indexBefore)
 
-  const modelsPath = file(root, "providers", "r4-coder", "models.json")
+  const modelsPath = file(root, "providers", ANCHOR_ID, "models.json")
   const modelsBefore = readFileSync(modelsPath, "utf8")
   const conflict = cli(
-    ["add-model", "--provider", "r4-coder", "--key", "deepseek-v4.1-flash", "--context", "1", "--output", "1"],
+    ["add-model", "--provider", ANCHOR_ID, "--key", ANCHOR_INLINE, "--context", "1", "--output", "1"],
     root,
   )
   assert.equal(conflict.status, 1)
@@ -157,10 +234,10 @@ test("重复 add-provider id / 重复 add-model key → 退出码 1 且文件不
 
 test("add-model --base 引用共享模型：只写 base，不用重复 limit", () => {
   const root = freshRoot()
-  const result = cli(["add-model", "--provider", "command-code", "--key", "flash", "--base", "deepseek/deepseek-v4.1-flash"], root)
+  const result = cli(["add-model", "--provider", ANCHOR_ID, "--key", "flash", "--base", ANCHOR_BASE], root)
   assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(readJson(file(root, "providers", "command-code", "models.json")).flash, {
-    base: "deepseek/deepseek-v4.1-flash",
+  assert.deepEqual(readJson(file(root, "providers", ANCHOR_ID, "models.json")).flash, {
+    base: ANCHOR_BASE,
   })
   assert.equal(cli(["validate"], root).status, 0)
 })
@@ -168,26 +245,26 @@ test("add-model --base 引用共享模型：只写 base，不用重复 limit", (
 test("add-shared-model --lab/--key 写 models/<lab>/<key>.json；重复冲突", () => {
   const root = freshRoot()
   const added = cli(
-    ["add-shared-model", "--lab", "deepseek", "--key", "foo", "--model-name", "Foo", "--context", "1000", "--output", "100"],
+    ["add-shared-model", "--lab", "solo", "--key", "foo", "--model-name", "Foo", "--context", "1000", "--output", "100"],
     root,
   )
   assert.equal(added.status, 0, added.stderr)
-  assert.deepEqual(readJson(file(root, "models", "deepseek", "foo.json")), {
+  assert.deepEqual(readJson(file(root, "models", "solo", "foo.json")), {
     name: "Foo",
     limit: { context: 1000, output: 100 },
   })
 
-  const conflict = cli(["add-shared-model", "--lab", "deepseek", "--key", "foo", "--context", "1", "--output", "1"], root)
+  const conflict = cli(["add-shared-model", "--lab", "solo", "--key", "foo", "--context", "1", "--output", "1"], root)
   assert.equal(conflict.status, 1)
   assert.match(conflict.stderr, /已存在/)
 })
 
 test("add-provider baseURL 占用 → 报错；--force 放行（评审 C）", () => {
   const root = freshRoot()
-  const args = ["add-provider", "--id", "dup-url", "--name", "Dup", "--baseurl", "https://api.r4.codes/v1", "--model", "m", "--context", "1", "--output", "1"]
+  const args = ["add-provider", "--id", "dup-url", "--name", "Dup", "--baseurl", ANCHOR_URL, "--model", "m", "--context", "1", "--output", "1"]
   const conflicted = cli(args, root)
   assert.equal(conflicted.status, 1)
-  assert.match(conflicted.stderr, /已被供应商 "r4-coder" 使用/)
+  assert.match(conflicted.stderr, new RegExp(`已被供应商 "${escapeRe(ANCHOR_ID)}" 使用`))
 
   const forced = cli([...args, "--force"], root)
   assert.equal(forced.status, 0, forced.stderr)
@@ -200,7 +277,7 @@ test("RF5：非法路径段（含 : 或 /）被拒", () => {
   assert.equal(badId.status, 1)
   assert.match(badId.stderr, /非法/)
 
-  const badBase = cli(["add-model", "--provider", "r4-coder", "--key", "m", "--base", "a:b/c"], root)
+  const badBase = cli(["add-model", "--provider", ANCHOR_ID, "--key", "m", "--base", "a:b/c"], root)
   assert.equal(badBase.status, 1)
   assert.match(badBase.stderr, /非法/)
 
@@ -212,9 +289,9 @@ test("RF5：非法路径段（含 : 或 /）被拒", () => {
 test("sync：手改子文件后同步 revision；不 sync 则 validate 报 revision 不一致", () => {
   const root = freshRoot()
   assert.equal(cli(["sync"], root).status, 0)
-  const modelsPath = file(root, "providers", "r4-coder", "models.json")
+  const modelsPath = file(root, "providers", ANCHOR_ID, "models.json")
   const models = readJson(modelsPath)
-  models["r4-mini"] = { limit: { context: 1000, output: 100 } }
+  models["anchor-extra"] = { limit: { context: 1000, output: 100 } }
   writeFileSync(modelsPath, `${JSON.stringify(models, null, 2)}\n`)
 
   const stale = cli(["validate"], root)
@@ -273,14 +350,14 @@ test("validate 汇总计数；子文件损坏报错", () => {
   )
 
   const broken = freshRoot()
-  writeFileSync(file(broken, "providers", "r4-coder", "models.json"), "{ broken")
+  writeFileSync(file(broken, "providers", ANCHOR_ID, "models.json"), "{ broken")
   const bad = cli(["validate"], broken)
   assert.equal(bad.status, 1)
   assert.match(bad.stderr, /校验失败/)
 })
 
 test("B1：同一内容 CRLF 与 LF 的 revision 相同（换行归一）", () => {
-  const rel = ["providers", "r4-coder", "models.json"]
+  const rel = ["providers", ANCHOR_ID, "models.json"]
   const lfRoot = freshRoot()
   const crlfRoot = freshRoot()
   const lf = readFileSync(file(lfRoot, ...rel), "utf8").replace(/\r\n/g, "\n")
@@ -305,7 +382,7 @@ test("I1：单段字段不许含 /；--base 恰好两段", () => {
   assert.equal(badLab.status, 1)
   assert.match(badLab.stderr, /非法/)
 
-  const badBase = cli(["add-model", "--provider", "r4-coder", "--key", "m", "--base", "a/b/c"], root)
+  const badBase = cli(["add-model", "--provider", ANCHOR_ID, "--key", "m", "--base", "a/b/c"], root)
   assert.equal(badBase.status, 1)
   assert.match(badBase.stderr, /非法/)
 
@@ -348,24 +425,29 @@ test("list/search 暴露顶层共享模型（含未被引用的）；show 支持
     0,
   )
 
+  const view = registryView(root)
   const list = cli(["list"], root)
   assert.equal(list.status, 0, list.stderr)
-  assert.match(list.stdout, /顶层共享模型（2）/)
+  // 原有共享模型 + 新加的 solo/only
+  assert.match(list.stdout, new RegExp(`顶层共享模型（${view.sharedCount()}）`))
   assert.match(list.stdout, /solo\/only/)
-  assert.match(list.stdout, /deepseek\/deepseek-v4\.1-flash/)
+  assert.match(list.stdout, new RegExp(escapeRe(ANCHOR_BASE)))
 
   const json = JSON.parse(cli(["list", "--json"], root).stdout)
   const shared = json.sharedModels as Array<{ ref: string; usedBy: string[] }>
-  assert.ok(shared.some((m) => m.ref === "solo/only" && m.usedBy.length === 0))
-  assert.ok(shared.some((m) => m.ref === "deepseek/deepseek-v4.1-flash" && m.usedBy.includes("r4-coder")))
+  assert.ok(shared.some((m) => m.ref === "solo/only" && m.usedBy.length === 0), "未被引用的共享模型也要列出")
+  assert.ok(
+    shared.some((m) => m.ref === ANCHOR_BASE && m.usedBy.includes(ANCHOR_ID)),
+    "被引用的共享模型要带出引用方",
+  )
 
   const search = cli(["search", "solo"], root) // 未被引用也能搜到
   assert.equal(search.status, 0, search.stderr)
   assert.match(search.stdout, /solo\/only/)
 
-  const show = cli(["show", "deepseek/deepseek-v4.1-flash"], root)
+  const show = cli(["show", ANCHOR_BASE], root)
   assert.equal(show.status, 0, show.stderr)
-  assert.match(show.stdout, /"context": 1048576/)
+  assert.match(show.stdout, new RegExp(`"context": ${ANCHOR_BASE_LIMIT.context}`))
 })
 
 test("check：随仓通过；孤儿共享模型=提醒、--strict 失败；悬空引用=错误", () => {
@@ -381,9 +463,9 @@ test("check：随仓通过；孤儿共享模型=提醒、--strict 失败；悬�
   assert.equal(strict.status, 1)
   assert.match(strict.stderr, /--strict/)
 
-  const modelsPath = file(root, "providers", "r4-coder", "models.json")
+  const modelsPath = file(root, "providers", ANCHOR_ID, "models.json")
   const models = readJson(modelsPath)
-  models["deepseek-v4.1-flash"].base = "ghost/none"
+  models[ANCHOR_BASE_ONLY].base = "ghost/none"
   writeFileSync(modelsPath, `${JSON.stringify(models, null, 2)}\n`)
   const bad = cli(["check"], root)
   assert.equal(bad.status, 1)
@@ -393,80 +475,87 @@ test("check：随仓通过；孤儿共享模型=提醒、--strict 失败；悬�
 test("set-model：字段补丁 + --unset 清空；非法 --unset 报错", () => {
   const root = freshRoot()
   const set = cli(
-    ["set-model", "--provider", "r4-coder", "--key", "deepseek-v4.1-flash", "--model-name", "DS", "--unset", "base", "--context", "1000", "--output", "100"],
+    ["set-model", "--provider", ANCHOR_ID, "--key", ANCHOR_BASE_ONLY, "--model-name", "DS", "--unset", "base", "--context", "1000", "--output", "100"],
     root,
   )
   assert.equal(set.status, 0, set.stderr)
-  assert.deepEqual(readJson(file(root, "providers", "r4-coder", "models.json"))["deepseek-v4.1-flash"], {
+  assert.deepEqual(readJson(file(root, "providers", ANCHOR_ID, "models.json"))[ANCHOR_BASE_ONLY], {
     name: "DS",
     limit: { context: 1000, output: 100 },
   })
 
-  const bad = cli(["set-model", "--provider", "r4-coder", "--key", "deepseek-v4.1-flash", "--unset", "nope"], root)
+  const bad = cli(["set-model", "--provider", ANCHOR_ID, "--key", ANCHOR_BASE_ONLY, "--unset", "nope"], root)
   assert.equal(bad.status, 1)
   assert.match(bad.stderr, /--unset nope 不支持/)
 })
 
 test("set-provider：改名 / --unset baseurl（未传字段保持原样）", () => {
   const root = freshRoot()
-  const set = cli(["set-provider", "--id", "r4-coder", "--name", "R4 Renamed", "--unset", "baseurl"], root)
+  const anchorPackage = registryView(root).provider(ANCHOR_ID).package
+  const set = cli(["set-provider", "--id", ANCHOR_ID, "--name", "Anchor Renamed", "--unset", "baseurl"], root)
   assert.equal(set.status, 0, set.stderr)
-  const provider = readJson(file(root, "providers", "r4-coder", "provider.json"))
-  assert.equal(provider.name, "R4 Renamed")
-  assert.equal(provider.package, "@opencode/ai/providers/openai-compatible")
+  const provider = readJson(file(root, "providers", ANCHOR_ID, "provider.json"))
+  assert.equal(provider.name, "Anchor Renamed")
+  assert.equal(provider.package, anchorPackage, "未传的 package 保持原样")
   assert.equal("baseURL" in provider, false)
 })
 
 test("set-shared-model：补丁只改传入字段，并提示引用方", () => {
   const root = freshRoot()
-  const set = cli(["set-shared-model", "--lab", "deepseek", "--key", "deepseek-v4.1-flash", "--context", "123", "--output", "45"], root)
+  const anchorName = registryView(root).sharedSpec(ANCHOR_BASE).name
+  const set = cli(["set-shared-model", "--lab", "anchor", "--key", "base-model", "--context", "123", "--output", "45"], root)
   assert.equal(set.status, 0, set.stderr)
   assert.match(set.stdout, /改动对引用它的供应商同时生效/)
-  const model = readJson(file(root, "models", "deepseek", "deepseek-v4.1-flash.json"))
+  const model = readJson(file(root, "models", "anchor", "base-model.json"))
   assert.deepEqual(model.limit, { context: 123, output: 45 })
-  assert.equal(model.name, "Deepseek V4.1 Flash")
+  assert.equal(model.name, anchorName, "未传的 name 保持原样")
 })
 
 test("remove-model：拒绝删唯一模型；可删多模型之一", () => {
   const root = freshRoot()
-  // 先删到只剩一个，再删最后一个必须被拒（不依赖随仓某家恰好只有一个模型）
-  assert.equal(cli(["add-model", "--provider", "r4-coder", "--key", "extra", "--context", "1", "--output", "1"], root).status, 0)
-  const removed = cli(["remove-model", "--provider", "r4-coder", "--key", "extra"], root)
-  assert.equal(removed.status, 0, removed.stderr)
-  assert.equal("extra" in readJson(file(root, "providers", "r4-coder", "models.json")), false)
+  // 锚点供应商自带 3 个模型，逐个删到只剩一个，最后一个必须被拒
+  const modelsPath = file(root, "providers", ANCHOR_ID, "models.json")
+  assert.ok(Object.keys(readJson(modelsPath)).length > 1)
 
-  while (true) {
-    const models = readJson(file(root, "providers", "r4-coder", "models.json")) as Record<string, unknown>
-    const keys = Object.keys(models)
-    if (keys.length === 1) {
-      const last = cli(["remove-model", "--provider", "r4-coder", "--key", keys[0]!], root)
-      assert.equal(last.status, 1, `删唯一模型 ${keys[0]} 应被拒绝`)
-      assert.match(last.stderr, /唯一的模型/)
-      break
-    }
-    const dropped = cli(["remove-model", "--provider", "r4-coder", "--key", keys[0]!], root)
-    assert.equal(dropped.status, 0, dropped.stderr)
-  }
-  assert.equal(Object.keys(readJson(file(root, "providers", "r4-coder", "models.json"))).length, 1)
+  const dropped = cli(["remove-model", "--provider", ANCHOR_ID, "--key", ANCHOR_OVERRIDE], root)
+  assert.equal(dropped.status, 0, dropped.stderr)
+  assert.equal(ANCHOR_OVERRIDE in readJson(modelsPath), false)
+
+  const last = cli(["remove-model", "--provider", ANCHOR_ID, "--key", ANCHOR_INLINE], root)
+  assert.equal(last.status, 0, last.stderr)
+  const refuse = cli(["remove-model", "--provider", ANCHOR_ID, "--key", ANCHOR_BASE_ONLY], root)
+  assert.equal(refuse.status, 1, "删到只剩一个时，删最后一个必须被拒")
+  assert.match(refuse.stderr, /唯一的模型/)
+  assert.deepEqual(Object.keys(readJson(modelsPath)), [ANCHOR_BASE_ONLY])
 })
 
 test("remove-provider：删目录 + 从 index 移除；拒绝删唯一供应商", () => {
   const root = freshRoot()
-  const removed = cli(["remove-provider", "--id", "r4-coder"], root)
+  const view = registryView(root)
+  const before = view.ids()
+  const doomed = need(before[0], "至少一家供应商")
+
+  const removed = cli(["remove-provider", "--id", doomed], root)
   assert.equal(removed.status, 0, removed.stderr)
-  assert.equal(existsSync(file(root, "providers", "r4-coder")), false)
-  assert.deepEqual(readJson(file(root, "index.json")).providers, ["command-code", "open-design"])
+  assert.equal(existsSync(file(root, "providers", doomed)), false)
+  assert.deepEqual(readJson(file(root, "index.json")).providers, before.filter((id) => id !== doomed))
   assert.equal(cli(["validate"], root).status, 0)
 
-  assert.equal(cli(["remove-provider", "--id", "command-code"], root).status, 0)
-  const last = cli(["remove-provider", "--id", "open-design"], root)
-  assert.equal(last.status, 1)
-  assert.match(last.stderr, /唯一的供应商/)
+  // 一路删到只剩最后一家
+  for (const id of registryView(root).ids()) {
+    const result = cli(["remove-provider", "--id", id], root)
+    if (id === registryView(root).ids().at(-1)) {
+      assert.equal(result.status, 1, "删唯一供应商必须被拒")
+      assert.match(result.stderr, /唯一的供应商/)
+    } else {
+      assert.equal(result.status, 0, result.stderr)
+    }
+  }
 })
 
 test("remove-shared-model：仍被引用则拒绝；无人引用才删并清理空 lab 目录", () => {
   const root = freshRoot()
-  const refused = cli(["remove-shared-model", "--ref", "deepseek/deepseek-v4.1-flash"], root)
+  const refused = cli(["remove-shared-model", "--ref", ANCHOR_BASE], root)
   assert.equal(refused.status, 1)
   assert.match(refused.stderr, /仍被引用/)
 
@@ -480,17 +569,14 @@ test("软提示：内联参数与某共享模型相同 → 提示可用 --base �
   const root = freshRoot()
   const result = cli(
     [
-      "add-model", "--provider", "r4-coder", "--key", "ds-copy",
-      "--model-name", "Deepseek V4.1 Flash", "--context", "1048576", "--output", "393216",
-      "--input", "text,image",
-      "--variant", 'low:{"reasoningEffort":"low"}',
-      "--variant", 'high:{"reasoningEffort":"high"}',
-      "--variant", 'max:{"reasoningEffort":"max"}',
+      "add-model", "--provider", ANCHOR_ID, "--key", "anchor-copy",
+      "--model-name", "Anchor Base", "--context", String(ANCHOR_BASE_LIMIT.context),
+      "--output", String(ANCHOR_BASE_LIMIT.output),
     ],
     root,
   )
   assert.equal(result.status, 0, result.stderr)
-  assert.match(result.stdout, /可改用 --base deepseek\/deepseek-v4\.1-flash 复用/)
+  assert.match(result.stdout, new RegExp(`可改用 --base ${escapeRe(ANCHOR_BASE)} 复用`))
 })
 
 test("复用共享模型：add-provider --base 只写 base/modelID（不重复 limit）", () => {
@@ -498,14 +584,14 @@ test("复用共享模型：add-provider --base 只写 base/modelID（不重复 l
   const result = cli(
     [
       "add-provider", "--id", "reuse", "--name", "Reuse", "--baseurl", "https://api.reuse.example/v1",
-      "--model", "deepseek-v4.1-flash", "--base", "deepseek/deepseek-v4.1-flash",
-      "--model-id", "deepseek/deepseek-v4.1-flash",
+      "--model", "reuse-model", "--base", ANCHOR_BASE,
+      "--model-id", "upstream/reuse",
     ],
     root,
   )
   assert.equal(result.status, 0, result.stderr)
   assert.deepEqual(readJson(file(root, "providers", "reuse", "models.json")), {
-    "deepseek-v4.1-flash": { base: "deepseek/deepseek-v4.1-flash", modelID: "deepseek/deepseek-v4.1-flash" },
+    "reuse-model": { base: ANCHOR_BASE, modelID: "upstream/reuse" },
   })
   assert.equal(cli(["validate"], root).status, 0)
 })

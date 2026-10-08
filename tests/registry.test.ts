@@ -1,12 +1,22 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { test } from "node:test"
 
 import { buildRegistry, parseManifest } from "../plugin/opencode-providers/registry/aggregate.ts"
 import { buildProviderModels } from "../plugin/opencode-providers/registry/models.ts"
 import { parseRegistry } from "../plugin/opencode-providers/registry/schema.ts"
+import { need, registryView } from "./helpers/shipped.ts"
+
+/**
+ * 走**随仓注册表**的端到端链路：分文件聚合 → schema → 注册用的模型装配。
+ *
+ * 期望值一律**从注册表本身动态推导**（不写死任何供应商 / 模型 / 共享模型），
+ * 所以新增或删除供应商、模型、共享模型时这个文件不需要改一行。
+ */
 
 const root = new URL("../registry/", import.meta.url)
+const rootPath = fileURLToPath(root)
 const read = (rel: string): unknown => JSON.parse(readFileSync(new URL(rel, root), "utf8"))
 
 const manifest = parseManifest(read("index.json"))
@@ -20,17 +30,27 @@ test("随仓分文件聚合后通过 schema 校验", () => {
   assert.equal(result.ok, true, result.ok ? "" : result.errors.join("\n"))
 })
 
-test("真实供应商：command-code / r4-coder 都在，且 keyLabel 各自不同", () => {
+test("真实供应商：每家都有 name/package，且 baseURL 不重复", () => {
   const result = parseRegistry(shipped)
   assert.equal(result.ok, true)
   if (!result.ok) return
   const providers = result.registry.providers
-  assert.ok(providers["command-code"], "缺少 command-code")
-  assert.ok(providers["r4-coder"], "缺少 r4-coder")
-  assert.equal(providers["command-code"]!.baseURL, "https://api.commandcode.ai/provider/v1")
-  assert.equal(providers["r4-coder"]!.baseURL, "https://api.r4.codes/v1")
-  assert.match(providers["command-code"]!.keyLabel ?? "", /Command Code/)
-  assert.match(providers["r4-coder"]!.keyLabel ?? "", /R4 Coder/)
+  const view = registryView(rootPath)
+
+  // manifest 列出的每一家都聚合进来了，且至少一个模型
+  assert.deepEqual(Object.keys(providers).sort(), view.ids())
+  for (const id of view.ids()) {
+    const provider = providers[id]!
+    assert.equal(provider.name, view.provider(id).name)
+    assert.ok(provider.package, `${id} 应声明 package`)
+    assert.ok(Object.keys(provider.models).length > 0, `${id} 应至少有一个模型`)
+  }
+
+  // baseURL 不重复（冲突是 add-provider 会拒绝的情况）
+  const urls = Object.entries(providers)
+    .map(([id, provider]) => [id, provider.baseURL] as const)
+    .filter((pair): pair is readonly [string, string] => pair[1] !== undefined)
+  assert.equal(new Set(urls.map(([, url]) => url)).size, urls.length)
 })
 
 test("真实模型：共享 base + 各自 modelID 覆盖（走注册用的 buildProviderModels）", () => {
@@ -38,34 +58,78 @@ test("真实模型：共享 base + 各自 modelID 覆盖（走注册用的 build
   assert.equal(result.ok, true)
   if (!result.ok) return
   const registry = result.registry
+  const view = registryView(rootPath)
 
-  const commandCode = buildProviderModels(registry, "command-code", registry.providers["command-code"]!)
-  const r4 = buildProviderModels(registry, "r4-coder", registry.providers["r4-coder"]!)
-  assert.equal(commandCode.length, 1)
-  assert.ok(r4.length >= 1)
+  // 每家每个模型都能装配出来，且模型总数与注册表一致
+  let total = 0
+  for (const id of view.ids()) {
+    const models = buildProviderModels(registry, id, registry.providers[id]!)
+    assert.equal(models.length, view.keys(id).length, `${id} 装配出的模型数应与注册表一致`)
+    total += models.length
+    for (const model of models) {
+      assert.equal(model.providerID, id)
+      assert.ok(model.limit && model.limit.context > 0 && model.limit.output > 0, `${id}/${model.id} 应有正数 limit`)
+      assert.equal(model.capabilities.tools, true, "插件默认补 tools")
+    }
+  }
+  assert.equal(total, view.modelCount())
 
-  const cc = commandCode[0]!
-  const r4m = r4.find((model) => model.id === "deepseek-v4.1-flash")!
-  for (const model of [cc, r4m]) {
-    assert.equal(model.id, "deepseek-v4.1-flash")
-    assert.equal(model.name, "Deepseek V4.1 Flash")
-    assert.deepEqual(model.limit, { context: 1048576, output: 393216 })
-    assert.deepEqual(
-      model.variants.map((variant) => variant.id),
-      ["low", "high", "max"],
+  // 引用了共享 base 的模型：名字/limit 来自共享模型，各家可覆盖 modelID
+  for (const { id, key, spec } of view.basedModels()) {
+    const ref = need(spec.base, `${id}/${key} 的 base`)
+    const sharedSpec = view.sharedSpec(ref)
+    const assembled = need(
+      buildProviderModels(registry, id, registry.providers[id]!).find((model) => model.id === key),
+      `${id}/${key}`,
     )
-    assert.equal(model.variants[2]?.settings?.reasoningEffort, "max")
-    assert.equal(model.capabilities.tools, true)
+    assert.equal(assembled.name, sharedSpec.name, `${id}/${key} 应继承共享模型 name`)
+    assert.deepEqual(assembled.limit, sharedSpec.limit, `${id}/${key} 应继承共享模型 limit`)
+    // modelID 默认等于 key，除非显式覆盖
+    assert.equal(assembled.modelID, spec.modelID ?? key)
   }
-  // command-code 覆盖了发往上游的真实 id；r4-coder 用默认（= map key）
-  assert.equal(cc.modelID, "deepseek/deepseek-v4.1-flash")
-  assert.equal(r4m.modelID, "deepseek-v4.1-flash")
 
-  // r4-coder 另有内联模型：内联 limit 原样落地，且不带共享 base
-  const kimi = r4.find((model) => model.id === "kimi-k3")
-  if (kimi) {
-    assert.equal(kimi.name, "Kimi K3")
-    assert.equal(kimi.modelID, "kimi-k3")
-    assert.deepEqual(kimi.limit, { context: 1048576, output: 131072 })
+  // 内联模型：不带 base，limit 原样落地
+  for (const id of view.ids()) {
+    for (const [key, spec] of Object.entries(view.models(id))) {
+      if (spec.base !== undefined) continue
+      const assembled = need(
+        buildProviderModels(registry, id, registry.providers[id]!).find((model) => model.id === key),
+        `${id}/${key}`,
+      )
+      assert.deepEqual(assembled.limit, spec.limit, `${id}/${key} 内联 limit 应原样落地`)
+      assert.equal(assembled.modelID, spec.modelID ?? key)
+    }
   }
+})
+
+test("随仓里被 base 引用的共享模型都存在（无悬空引用）", () => {
+  const view = registryView(rootPath)
+  for (const ref of view.referenced().keys()) {
+    assert.ok(view.shared()[ref], `共享模型 ${ref} 被引用但不存在`)
+  }
+  // 每个共享模型文件都能通过 schema
+  const result = parseRegistry(shipped)
+  assert.equal(result.ok, true)
+  if (!result.ok) return
+  for (const ref of view.sharedRefs()) {
+    assert.ok(result.registry.models[ref], `聚合结果缺少共享模型 ${ref}`)
+  }
+})
+
+test("随仓里没有 env/apiKey 明文凭据", () => {
+  const view = registryView(rootPath)
+  for (const id of view.ids()) {
+    const serialized = JSON.stringify(view.provider(id))
+    assert.doesNotMatch(serialized, /"env"/, `${id} 不该声明 env`)
+    assert.doesNotMatch(serialized, /"apiKey"/, `${id} 不该声明 apiKey`)
+    for (const [key, spec] of Object.entries(view.models(id))) {
+      assert.doesNotMatch(JSON.stringify(spec), /"env"|"apiKey"/, `${id}/${key} 不该带凭据字段`)
+    }
+  }
+})
+
+test("随仓供应商 id 都是合法路径段（不含 / 与 :）", () => {
+  const view = registryView(rootPath)
+  for (const id of view.ids()) assert.match(id, /^[a-z0-9._-]+$/)
+  for (const ref of view.sharedRefs()) assert.equal(ref.split("/").length, 2)
 })

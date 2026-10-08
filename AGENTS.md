@@ -82,6 +82,16 @@
 
 - 单测：`node --test`（Node ≥ 24；含 `scripts/changelog.mjs` 的工具测试与
   `tests/setup.test.ts` —— 走**真 server 入口 + 真注册表 + 假 ctx** 钉住「拉到什么就注册什么」的链路）
+- **铁律：改注册表数据不许改任何测试代码**（2026-10-08 用户明确要求）。skills 的日常操作
+  （新增/删除供应商、模型、共享模型）必须是**纯数据改动**，`node --test` 必过。
+  因此**测试里禁止写死**任何随仓数据（供应商 id、`deepseek-v4.1-flash`、`keyLabel` 文案、模型数、共享模型数、
+  `keyLabel` 断言 —— 注意 CLI 根本写不了 `keyLabel`，经 skills 新建的供应商**没有**它）。
+  期望值一律从 `tests/helpers/shipped.ts`（`registryView(root)`，只读）推导；
+  `tests/registry-cli.test.ts` 在临时副本里播种**固定锚点**供应商（`zz-anchor`：`anchor-shared` 只写 base /
+  `anchor-override` 覆盖 modelID / `anchor-inline` 内联 / 共享模型 `anchor/base-model`），
+  所以 CLI 测试的操作对象与随仓数据无关。已实测：+1 供应商（含无 `keyLabel`）+3 模型、
+  删供应商/删模型、共享模型清空 → 均 99/99 零改动。
+  注意 Node 原生 TS 只擦除类型：**class 成员修饰符（`private`）和注释里的 `*/` 都会解析失败**，故 helper 用闭包工厂
 - 真机冒烟（HTTP，不需要 TUI）：`node scripts/smoke-api.mjs --list` / `node scripts/smoke-api.mjs`
   （鉴权自动读 `~/.local/state/opencode/service.json`；`models` 场景会写一条临时凭据再删，只碰「当前无凭据」的 supplier）
 - 入口打包/语法检查（esbuild，`Done in` 即通过；TUI 入口的注入包必须标 `--external`，否则解析失败 exit 1）：

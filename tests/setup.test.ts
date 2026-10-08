@@ -1,9 +1,11 @@
 import assert from "node:assert/strict"
 import { readFileSync, readdirSync } from "node:fs"
 import { test } from "node:test"
+import { fileURLToPath } from "node:url"
 
 import plugin from "../plugin/opencode-providers/index.ts"
 import { DEFAULT_REGISTRY_URL } from "../plugin/opencode-providers/registry/source.ts"
+import { registryView, type ProviderSpec } from "./helpers/shipped.ts"
 
 /**
  * 走**真的 server 入口** + **随仓分文件注册表** + 假的插件 ctx，钉住注册链路：
@@ -51,6 +53,27 @@ for (const id of PROVIDER_IDS) {
   }
 }
 const EXPECTED_FETCHES = 1 + PROVIDER_IDS.length * 2 + SHARED_BASES.size
+
+/** 每家的 provider.json（name / baseURL / keyLabel），期望值从随仓注册表推导。 */
+const SHIPPED_PROVIDERS: Record<string, ProviderSpec> = Object.fromEntries(
+  PROVIDER_IDS.map((id) => [
+    id,
+    JSON.parse(REGISTRY_TREE[`providers/${id}/provider.json`]!) as ProviderSpec,
+  ]),
+)
+
+/** 随仓某家带 modelID 覆盖 / 只写 base 的模型（动态挑，找不到就跳过该断言）。 */
+const SHIPPED_VIEW = registryView(fileURLToPath(new URL("../registry/", import.meta.url)))
+const OVERRIDE_MODEL = SHIPPED_VIEW.modelWithModelIDOverride()
+const BASE_ONLY_MODEL = SHIPPED_VIEW.baseOnlyModel()
+const INLINE_MODEL = (() => {
+  for (const id of PROVIDER_IDS) {
+    for (const [key, spec] of Object.entries(SHIPPED_VIEW.models(id))) {
+      if (spec.base === undefined && spec.limit !== undefined) return { id, key, spec }
+    }
+  }
+  return undefined
+})()
 
 /** Serves a registry tree keyed by manifest-relative path; missing keys are 404. */
 function treeFetch(tree: Record<string, string>, manifestUrl: string = DEFAULT_REGISTRY_URL) {
@@ -142,16 +165,26 @@ test("server 入口用随仓注册表注册 integration（带 metadata.source / 
 
   assert.deepEqual([...state.integrations.keys()].sort(), PROVIDER_IDS)
   for (const id of PROVIDER_IDS) {
-    assert.equal(state.integrations.get(id)!.metadata?.source, "opencode-providers")
+    const integration = state.integrations.get(id)!
+    const expectedLabel = SHIPPED_PROVIDERS[id]!.keyLabel ?? "Paste API key"
+    assert.equal(integration.metadata?.source, "opencode-providers")
+    // keyLabel 可选：没声明的供应商回落到通用 label（CLI 写不了 keyLabel，故新供应商通常没有）
+    if (SHIPPED_PROVIDERS[id]!.keyLabel === undefined) {
+      assert.equal("keyLabel" in (integration.metadata ?? {}), false)
+    } else {
+      assert.equal(integration.metadata?.keyLabel, expectedLabel)
+    }
   }
 
-  const commandCode = state.integrations.get("command-code")!
-  assert.equal(commandCode.name, "Command Code")
-  assert.equal(commandCode.metadata?.keyLabel, "Paste Command Code API key")
-
+  // 方法的 label 与 provider 的 keyLabel 同源（无 keyLabel 时用通用文案）
   const byIntegration = new Map(state.methods.map((entry) => [entry.integrationID, entry.method]))
-  assert.deepEqual(byIntegration.get("command-code"), { type: "key", label: "Paste Command Code API key" })
-  assert.deepEqual(byIntegration.get("r4-coder"), { type: "key", label: "Paste R4 Coder API key" })
+  assert.equal(byIntegration.size, PROVIDER_IDS.length)
+  for (const id of PROVIDER_IDS) {
+    assert.deepEqual(byIntegration.get(id), {
+      type: "key",
+      label: SHIPPED_PROVIDERS[id]!.keyLabel ?? "Paste API key",
+    })
+  }
 })
 
 test("server 入口注册 provider：activation auto + integrationID 对齐 + 注册表参数原样落地", async () => {
@@ -161,34 +194,50 @@ test("server 入口注册 provider：activation auto + integrationID 对齐 + �
   assert.equal(state.providers.length, PROVIDER_IDS.length)
   const providers = new Map(state.providers.map((entry) => [entry.info.id as string, entry]))
 
-  // 逐家通用契约：activation auto、integrationID 自对齐、至少一个模型。
+  // 逐家通用契约：注册表里的 name/package/baseURL 原样落地，凭据不由本项目管。
   for (const id of PROVIDER_IDS) {
     const entry = providers.get(id)!
+    const shipped = SHIPPED_PROVIDERS[id]!
     assert.equal(entry.info.activation, "auto")
     assert.equal(entry.info.integrationID, id)
+    assert.equal(entry.info.name, shipped.name)
+    assert.equal(entry.info.package, shipped.package)
+    assert.equal((entry.info.settings as any)?.baseURL, shipped.baseURL)
+    assert.equal((entry.info.settings as any)?.apiKey, undefined, "不该带 env/apiKey")
     assert.ok(entry.models.length > 0, `${id} 应至少注册一个模型`)
+    assert.equal(entry.models.length, Object.keys(SHIPPED_VIEW.models(id)).length)
+    for (const model of entry.models as readonly any[]) {
+      assert.equal(model.providerID, id)
+      assert.ok(model.limit.context > 0 && model.limit.output > 0, `${id}/${model.id} 应有正数 limit`)
+    }
   }
 
-  const commandCode = providers.get("command-code")!
-  assert.equal(commandCode.info.activation, "auto")
-  assert.equal(commandCode.info.integrationID, "command-code")
-  assert.equal(commandCode.info.package, "@opencode/ai/providers/openai-compatible")
-  assert.equal((commandCode.info.settings as any).baseURL, "https://api.commandcode.ai/provider/v1")
-  assert.equal(commandCode.info.settings && (commandCode.info.settings as any).apiKey, undefined, "不该带 env/apiKey")
+  // 覆盖了上游 modelID 的模型：注册时用上游真实 id，而不是 opencode 里的 key
+  if (OVERRIDE_MODEL) {
+    const entry = providers.get(OVERRIDE_MODEL.id)!
+    const model = entry.models.find((candidate: any) => candidate.id === OVERRIDE_MODEL.key)
+    assert.equal(model?.modelID, OVERRIDE_MODEL.modelID)
+  }
 
-  const model = commandCode.models[0]!
-  assert.equal(model.id, "deepseek-v4.1-flash")
-  assert.equal(model.modelID, "deepseek/deepseek-v4.1-flash")
-  assert.equal(model.providerID, "command-code")
-  assert.deepEqual(model.limit, { context: 1048576, output: 393216 })
-  assert.deepEqual(
-    model.variants.map((variant: any) => variant.id),
-    ["low", "high", "max"],
-  )
+  // 只写 base 的模型：limit 从共享模型解析出来
+  if (BASE_ONLY_MODEL) {
+    const entry = providers.get(BASE_ONLY_MODEL.id)!
+    const shared = SHIPPED_VIEW.sharedSpec(BASE_ONLY_MODEL.ref)
+    const model = entry.models.find((candidate: any) => candidate.id === BASE_ONLY_MODEL.key)
+    assert.equal(model?.name, shared.name)
+    assert.deepEqual(model?.limit, shared.limit)
+  }
 
-  const r4 = providers.get("r4-coder")!
-  assert.equal((r4.info.settings as any).baseURL, "https://api.r4.codes/v1")
-  assert.equal(r4.models[0]!.modelID, "deepseek-v4.1-flash")
+  // 内联模型：limit 原样落地
+  if (INLINE_MODEL) {
+    const entry = providers.get(INLINE_MODEL.id)!
+    const model = entry.models.find((candidate: any) => candidate.id === INLINE_MODEL.key)
+    assert.deepEqual(model?.limit, INLINE_MODEL.spec.limit)
+    assert.deepEqual(
+      model?.variants.map((variant: any) => variant.id),
+      (INLINE_MODEL.spec.variants ?? []).map((variant) => variant.id),
+    )
+  }
 })
 
 test("注册表不可用时不注册任何东西，但 setup 不抛（插件仍 active）", async () => {
