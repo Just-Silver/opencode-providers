@@ -4,19 +4,5 @@
   },
   "kimi-k3": {
     "base": "kimi/kimi-k3"
-  },
-  "test-refresh-probe": {
-    "name": "Test Refresh Probe",
-    "limit": {
-      "context": 131072,
-      "output": 8192
-    }
-  },
-  "test-refresh-probe-2": {
-    "name": "Test Refresh Probe 2",
-    "limit": {
-      "context": 131072,
-      "output": 8192
-    }
   }
 }
