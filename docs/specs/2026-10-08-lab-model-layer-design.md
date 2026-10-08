@@ -33,11 +33,25 @@
 
 实证（Kimi K3）：canon `models/moonshotai/kimi-k3.toml` 只有一份，20+ 家 relay 各自文件名不同（`moonshotai/Kimi-K3.toml` vs `moonshotai/kimi-k3.toml`）却全部 `base_model = "moonshotai/kimi-k3"`。**身份由 lab + 模型名决定，与各家的上流 id 无关。**
 
+其余 `gh` 实证（`anomalyco/models.dev`，默认分支 `dev`）：
+
+| 例 | 文件 | 说明 |
+|---|---|---|
+| A | `providers/openai/models/gpt-4o-2024-05-13.toml` 全内联，且 `models/openai/gpt-4o-2024-05-13.toml` 存在 | 例外①：provider 自己就是 lab 的第一方 host |
+| B | `providers/bailing/models/Ling-1T.toml`、`Ring-1T.toml` 全内联；`models/` 下无对应 canon，全仓无任何 provider base 它 | 例外②：无可归属的 lab |
+| C | `providers/cerebras/models/gpt-oss-120b.toml`（直接放 `models/` 根下）→ `base_model = "openai/gpt-oss-120b"` | **文件位置不算数，`base_model` 才是判据** |
+| D | `providers/amd/models/DeepSeek-V4.1-Flash.toml` → `base_model` + `[limit]` 覆盖（AMD 报 1048576，lab 记 1_000_000） | provider 覆盖 limit |
+| E | 20+ 家 Kimi，文件名各异，全 `base_model = "moonshotai/kimi-k3"` | 身份 = lab + 模型名，与各家 id 无关 |
+
+规模：240 家 provider，relay 绝大多数带 `base_model`；全内联是少数。
+
 ## 决策
 
 1. **身份不能用 `modelID`**（各家上流调用名不同，正是 canon 层要吸收的差异）。身份 = **lab + canon key**，由 agent 声明一次。
 2. **默认建家族**（对「能归属到某个 lab」的模型），不等复用。复用 = 引用同一个 canon，**不做任何自动检测**。
-3. **例外**：模型是**本家独有**（自研 / fine-tune / 无可归属 lab）→ 内联。
+3. **例外（本家独有 / `--inline`）**：模型**没有可归属的 lab**（自研 / fine-tune / 私有 beta 别名）→ 全量内联。
+   **判据是「能不能说出造它的 lab」，不是「有几家在卖」**：某家**独家代理**的模型仍是 lab 造的 → 照样要建 canon。
+   （本仓三家都是转售网关，暂无此例外；保留 `--inline` 作为逃生口，避免被迫编造假 lab。）
 4. **provider 层 override-only**：只写与 canon 的**真实差异**（上流 `modelID`、更小的 limit、真实模态差异）。
 5. 本仓 lab id 自定，**不强制与 models.dev 一致**；本次 Kimi 用 **`kimi`**（非 models.dev 的 `moonshotai`）。
 
