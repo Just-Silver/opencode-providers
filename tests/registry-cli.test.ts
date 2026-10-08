@@ -659,6 +659,46 @@ test("remove-shared-model：仍被引用则拒绝；无人引用才删并清理�
   assert.equal(existsSync(file(root, "models", "solo")), false)
 })
 
+test("remove-model：删掉最后一个引用者 → canon 自动删除并清空 lab 目录", () => {
+  const root = freshRoot()
+  const lab = freshLab(root)
+  assert.equal(
+    cli(["add-model", "--provider", ANCHOR_ID, "--key", "solo-ref", "--lab", lab, "--lab-key", "km",
+         "--context", "1", "--output", "1"], root).status,
+    0,
+  )
+  assert.ok(existsSync(file(root, "models", lab, "km.json")))
+
+  const removed = cli(["remove-model", "--provider", ANCHOR_ID, "--key", "solo-ref"], root)
+  assert.equal(removed.status, 0, removed.stderr)
+  assert.equal(existsSync(file(root, "models", lab, "km.json")), false)
+  assert.equal(existsSync(file(root, "models", lab)), false, "空 lab 目录也要清掉")
+  assert.equal(cli(["validate"], root).status, 0)
+})
+
+test("remove-model：仍有别家引用 → canon 保留", () => {
+  const root = freshRoot()
+  // anchor/base-model 同时被 anchor-shared 与 anchor-override 引用；只删一个 → 必须保留
+  const removed = cli(["remove-model", "--provider", ANCHOR_ID, "--key", ANCHOR_BASE_ONLY], root)
+  assert.equal(removed.status, 0, removed.stderr)
+  assert.ok(existsSync(file(root, "models", "anchor", "base-model.json")), "仍有引用者，canon 必须保留")
+  assert.equal(cli(["validate"], root).status, 0)
+})
+
+test("remove-provider：整家删掉后，仅它引用的 canon 也自动清理", () => {
+  const root = freshRoot()
+  const lab = freshLab(root)
+  assert.equal(
+    cli(["add-provider", "--id", "solo-prov", "--name", "S", "--model", "m", "--lab", lab,
+         "--context", "1", "--output", "1"], root).status,
+    0,
+  )
+  const removed = cli(["remove-provider", "--id", "solo-prov"], root)
+  assert.equal(removed.status, 0, removed.stderr)
+  assert.equal(existsSync(file(root, "models", lab, "m.json")), false)
+  assert.equal(cli(["validate"], root).status, 0)
+})
+
 test("软提示：内联参数与某共享模型相同 → 提示可用 --base 复用", () => {
   const root = freshRoot()
   const result = cli(

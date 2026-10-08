@@ -28,6 +28,19 @@ import {
   resolvePackage,
 } from "./spec.mjs"
 
+/** 删掉已无人引用的共享模型文件（含空 lab 目录），返回被删的 ref 列表。必须在 syncManifest 之前调用。 */
+function deleteOrphanShared(root, shared, providers) {
+  const orphans = [...shared.keys()].filter(
+    (ref) => !providers.some((item) => Object.values(item.models).some((model) => model.base === ref)),
+  )
+  for (const ref of orphans) {
+    const path = sharedModelPath(root, ref)
+    rmSync(path, { force: true })
+    removeEmptyDir(dirname(path))
+  }
+  return orphans
+}
+
 export function commandSync(flags) {
   rejectUnknownFlags("sync", flags, new Set())
   const root = resolveRoot(flags)
@@ -270,16 +283,11 @@ export function commandRemoveProvider(flags) {
   parseTree({ ...tree, providers })
 
   rmSync(providerDir(root, id), { recursive: true, force: true })
+  const orphans = deleteOrphanShared(root, tree.shared, providers)
   syncManifest(root)
   console.log(`✓ 已删除供应商 "${id}"（${entry.provider.name}，${Object.keys(entry.models).length} 个模型）`)
   console.log(`  删除 ${providerDir(root, id)}/ 并重写 ${join(root, "index.json")}`)
-
-  const orphans = [...tree.shared.keys()].filter(
-    (ref) => !providers.some((item) => Object.values(item.models).some((model) => model.base === ref)),
-  )
-  if (orphans.length > 0) {
-    console.log(`  提示：以下共享模型已无人引用（可保留，或用 remove-shared-model 删除）：${orphans.join(", ")}`)
-  }
+  if (orphans.length > 0) console.log(`  已自动清理无人引用的共享模型：${orphans.join(", ")}`)
 }
 
 export function commandRemoveModel(flags) {
@@ -307,9 +315,11 @@ export function commandRemoveModel(flags) {
   parseTree({ ...tree, providers })
 
   writeJsonFile(join(providerDir(root, providerId), "models.json"), nextModels)
+  const orphans = deleteOrphanShared(root, tree.shared, providers)
   syncManifest(root)
   console.log(`✓ 已从供应商 "${providerId}" 删除模型 "${key}"`)
   console.log(`  写入 ${providerDir(root, providerId)}/models.json 与 ${join(root, "index.json")}`)
+  if (orphans.length > 0) console.log(`  已自动清理无人引用的共享模型：${orphans.join(", ")}`)
 }
 
 export function commandRemoveSharedModel(flags) {
