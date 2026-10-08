@@ -7,18 +7,23 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-08
+
+首个稳定版（并入 `0.3.2-beta.0` / `0.3.2-beta.1` 的全部内容）。
+
+### Fixed
+
+- **强制刷新未携带 location → 模型列表不更新**：provider / model 注册**按 location 隔离**（同一个 `/api/model` 按请求目录返回不同结果）。`doRefresh` 调 RPC 时没传 location，于是只刷到服务端**默认目录**，用户所在目录的注册一直停在旧状态。改为 RPC 调用**带上当前 location**（`{ location: { directory } }`）；客户端刷新后同时失效并重取 `integration` / `model` / `provider`（`reloadCatalog`）。
+
 ### Changed
 
-- **技能 CLI：`add-provider` / `add-model` 现在必须声明模型来源（破坏性）**——`--lab <lab>`（建家族 canon
-  `registry/models/<lab>/<model>.json`，参数写进 canon、provider 层只写 `base`）/ `--base <lab>/<model>`（复用已有 canon）/
-  `--inline`（本家独有，必须自带 limit）。**取消原来的「默认内联」**：不给来源直接报错。判据是「能不能说出造它的 lab」，
-  **独家代理 ≠ 本家独有**。技能在 `search` 没命中任何 canon 时会先问「家族标签（lab）」，不再默认内联。
+- **技能 CLI：`add-provider` / `add-model` 现在必须声明模型来源（破坏性）**——`--lab <lab>`（建家族 canon `registry/models/<lab>/<model>.json`，参数写进 canon、provider 层只写 `base`）/ `--base <lab>/<model>`（复用已有 canon）/ `--inline`（本家独有，必须自带 limit）。**取消「默认内联」**：不给来源直接报错。判据是「能不能说出造它的 lab」，**独家代理 ≠ 本家独有**。技能在 `search` 没命中任何 canon 时会先问「家族标签（lab）」。
 - 注册表数据：`kimi-k3` 提升为共享模型 `kimi/kimi-k3`，`r4-coder` 改为 `base` 引用。
 
 ### Added
 
-- 技能 CLI：`--lab-key`（canon 文件名与 provider key 可不同）；`check` 新增「参数完全相同的两个 canon（重复家族）」提醒；
-  `remove-provider` / `remove-model` 后**自动清理无人引用的 canon**（并清空空 lab 目录）。
+- 技能 CLI：`--lab-key`（canon 文件名与 provider key 可不同）；`check` 新增「参数完全相同的两个 canon（重复家族）」提醒；`remove-provider` / `remove-model` 后**自动清理无人引用的 canon**（并清空空 lab 目录）。
+- （`0.3.2-beta.0`）注册表维护 CLI：复用共享模型（`list`/`search`/`show` 暴露顶层共享模型）、`set-*` 字段补丁 + `--unset`、`remove-*` 安全约束、`check [--strict]`、CLI 拆分 `scripts/lib/` 子模块；CI 增 `registry.mjs check --strict`。
 
 ## [0.3.2-beta.1] - 2026-10-08
 
@@ -202,7 +207,8 @@
 - 插件源码从 `.opencode/plugins/opencode-providers/` 移到 `plugin/opencode-providers/`：仓库自身不再是插件发现根，避免在仓库里跑 opencode 时与全局安装的同 id 副本相撞（`Duplicate plugin ID` → 面板里一条 `failed`）
 - 安装后**通常无需重启**（插件目录被文件监视热重载），不再要求 `opencode service restart`
 
-[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.3.0
 [0.1.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.1.0
