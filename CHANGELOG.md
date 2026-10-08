@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-08
+
 ### Changed
 
 - 技能 CLI：`list` / `list --json` 的**顶层共享模型引用方按供应商去重**（同一家多个模型引用同一 canon 时，不再出现 `r4-coder, r4-coder`）。
@@ -217,7 +219,8 @@
 - 插件源码从 `.opencode/plugins/opencode-providers/` 移到 `plugin/opencode-providers/`：仓库自身不再是插件发现根，避免在仓库里跑 opencode 时与全局安装的同 id 副本相撞（`Duplicate plugin ID` → 面板里一条 `failed`）
 - 安装后**通常无需重启**（插件目录被文件监视热重载），不再要求 `opencode service restart`
 
-[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.3.2...HEAD
+[Unreleased]: https://github.com/Just-Silver/opencode-providers/compare/v0.3.3...HEAD
+[0.3.3]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.3.3
 [0.3.2]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.3.2
 [0.3.1]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Just-Silver/opencode-providers/releases/tag/v0.3.0
