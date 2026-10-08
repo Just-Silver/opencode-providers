@@ -450,10 +450,28 @@ test("list/search 暴露顶层共享模型（含未被引用的）；show 支持
   assert.match(show.stdout, new RegExp(`"context": ${ANCHOR_BASE_LIMIT.context}`))
 })
 
-test("check：随仓通过；孤儿共享模型=提醒、--strict 失败；悬空引用=错误", () => {
+test("check：无孤儿时全绿；孤儿共享模型=提醒、--strict 失败；悬空引用=错误", () => {
   const root = freshRoot()
-  assert.equal(cli(["check"], root).status, 0)
-  assert.equal(cli(["check", "--strict"], root).status, 0)
+  // 随仓可能带孤儿共享模型（先建共享模型、后被引用的中间态），先删掉无人引用的再断言「全绿」——
+  // 断言的是 CLI 的判定逻辑，不是随仓当前数据长什么样。
+  const referenced = new Set<string>()
+  for (const id of registryView(root).ids()) {
+    for (const spec of Object.values(registryView(root).models(id))) {
+      if (typeof spec.base === "string") referenced.add(spec.base)
+    }
+  }
+  for (const ref of registryView(root).sharedRefs()) {
+    if (referenced.has(ref)) continue
+    assert.equal(
+      cli(["remove-shared-model", "--ref", ref], root).status,
+      0,
+      "未被引用的共享模型应当能直接删掉",
+    )
+  }
+
+  const clean = cli(["check"], root)
+  assert.equal(clean.status, 0, clean.stderr)
+  assert.equal(cli(["check", "--strict"], root).status, 0, clean.stderr)
 
   assert.equal(cli(["add-shared-model", "--lab", "solo", "--key", "only", "--context", "1", "--output", "1"], root).status, 0)
   const warn = cli(["check"], root)

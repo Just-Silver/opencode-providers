@@ -107,12 +107,18 @@ test("随仓里被 base 引用的共享模型都存在（无悬空引用）", ()
   for (const ref of view.referenced().keys()) {
     assert.ok(view.shared()[ref], `共享模型 ${ref} 被引用但不存在`)
   }
-  // 每个共享模型文件都能通过 schema
+
   const result = parseRegistry(shipped)
   assert.equal(result.ok, true)
   if (!result.ok) return
+
+  // 聚合是**按需拉取**：只拉被 base 引用的共享模型；未被引用的（孤儿）不进聚合结果。
+  for (const ref of view.referenced().keys()) {
+    assert.ok(result.registry.models[ref], `聚合结果缺少被引用的共享模型 ${ref}`)
+  }
   for (const ref of view.sharedRefs()) {
-    assert.ok(result.registry.models[ref], `聚合结果缺少共享模型 ${ref}`)
+    if (view.referenced().has(ref)) continue
+    assert.equal(result.registry.models[ref], undefined, `孤儿共享模型 ${ref} 不该被拉取`)
   }
 })
 

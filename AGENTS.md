@@ -89,9 +89,13 @@
   期望值一律从 `tests/helpers/shipped.ts`（`registryView(root)`，只读）推导；
   `tests/registry-cli.test.ts` 在临时副本里播种**固定锚点**供应商（`zz-anchor`：`anchor-shared` 只写 base /
   `anchor-override` 覆盖 modelID / `anchor-inline` 内联 / 共享模型 `anchor/base-model`），
-  所以 CLI 测试的操作对象与随仓数据无关。已实测：+1 供应商（含无 `keyLabel`）+3 模型、
-  删供应商/删模型、共享模型清空 → 均 99/99 零改动。
-  注意 Node 原生 TS 只擦除类型：**class 成员修饰符（`private`）和注释里的 `*/` 都会解析失败**，故 helper 用闭包工厂
+  所以 CLI 测试的操作对象与随仓数据无关。
+  **已实测 11 个场景全部 99/99 零改动**：+4 家供应商（无 `keyLabel`/`base` 引用/多模态）、
+  批量 +4 模型、孤儿共享模型（先建后引的中间态）、孤儿→被引用、改名+改 limit（provider/model/共享模型）、
+  共享模型清空、重建孤儿、批量删模型、删供应商、删到只剩 2 家 / 1 个模型。
+  注意 Node 原生 TS 只擦除类型：**class 成员修饰符（`private`）和注释里的 `*/` 都会解析失败**，故 helper 用闭包工厂。
+  另：**聚合是按需拉取**，只拉被 `base` 引用的共享模型 —— 别断言「孤儿共享模型出现在 `registry.models`」；
+  `add-shared-model` 后的孤儿态是合法中间态，测试要先清孤儿再断言 `check` 全绿
 - 真机冒烟（HTTP，不需要 TUI）：`node scripts/smoke-api.mjs --list` / `node scripts/smoke-api.mjs`
   （鉴权自动读 `~/.local/state/opencode/service.json`；`models` 场景会写一条临时凭据再删，只碰「当前无凭据」的 supplier）
 - 入口打包/语法检查（esbuild，`Done in` 即通过；TUI 入口的注入包必须标 `--external`，否则解析失败 exit 1）：
