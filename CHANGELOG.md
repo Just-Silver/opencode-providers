@@ -18,6 +18,12 @@
   - CLI 拆分为入口 + `scripts/lib/` 子模块（`cli`/`store`/`spec`/`report`/`commands-{read,write}`），避免单文件膨胀。
 - CI 增加 `registry.mjs check --strict` 一步。
 
+### Changed
+
+- **文档按读者拆分**：`README.md` 收敛为使用者内容（安装 / 使用 / 疑难解答）；新增 `CONTRIBUTING.md` 作开发者入口
+  （本地开发 / 架构要点 / 测试与验证 / 注册表维护 / 发版流程 / 约定）；`AGENTS.md` 的发版与验证细节收敛为要点并指向
+  `CONTRIBUTING.md`。
+
 ## [0.3.1] - 2026-10-07
 
 ### Fixed

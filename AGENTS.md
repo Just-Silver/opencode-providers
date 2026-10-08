@@ -3,7 +3,7 @@
 `opencode-providers`：给 opencode 补上 **models.dev 目录里没有的供应商**。
 一份自维护注册表（**按供应商分文件**：`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`，GitHub raw 托管；插件运行期拉取并聚合成一份）+ 一个 opencode 插件，实现**零 `opencode.json`** 接入。
 
-现状：`0.3.0` 是**正式版**（npm `latest`，OIDC 发布 + provenance）；预发布在 `next`。
+现状：`0.3.1` 是**正式版**（npm `latest`，OIDC 发布 + provenance）；预发布在 `next`。
 
 # 语言规则
 
@@ -66,45 +66,31 @@
 - **版本单一事实源 = `package.json` 的 `version`**：CI/CD 用 `node scripts/changelog.mjs check [--tag vX.Y.Z]` 校验
   `tag == package.json == CHANGELOG 顶部版本小节` 三处一致，不一致**不产生任何发布动作**；
   Release 正文用 `node scripts/changelog.mjs notes --out …` 从 CHANGELOG 该小节截取（不是 `git log` 堆砌）
-- **预发布优先**：先发 `0.1.0-beta.x` 到 npm 的 **`next`**（`publishConfig.tag = next`），验证后再发正式版
-- 流程：整理 `CHANGELOG.md` 的 `[Unreleased]` 成 `## [x.y.z(-beta.n)] - YYYY-MM-DD` → `npm version`（只改 `package.json`）
-  → commit → 预发布 push tag `vX.Y.Z-beta.n`（或手动 Run workflow 勾 `publish`）
-- **正式版**：`npm version x.y.z --no-git-tag-version` → commit → `git push origin main` + `git tag vX.Y.Z && git push origin vX.Y.Z`，
-  CD 直接发 `latest` 并建 Release（也可 **Actions → Release → Run workflow 勾 `publish` + `stable`**，等价且会补建 tag）。
-  预发布走 tag `vX.Y.Z-beta.n`：自动发 `next` + 建 Release，不碰 `latest`
-- 认证走 **npm Trusted Publishing（OIDC，`id-token: write`，无长期 token）**；但**包必须已存在**，
-  所以 `0.1.0-beta.0` 需要**人工首发一次**，之后才交给 CD。npm 侧的 Workflow filename 必须与 `release.yml` 同名
+- **预发布优先**（`publishConfig.tag = next`），正式版只能手动发 `latest`；认证走
+  **npm Trusted Publishing（OIDC，`id-token: write`，无长期 token）**，但**包必须已存在** → **首个版本要人工发一次**
 - 预检用 `npm pack --dry-run`，**别用 `npm publish --dry-run`**（后者会因「版本已存在」而报错，哪怕只是想预检）
-- `.github/workflows/ci.yml` 在 push main / PR 上跑「版本一致性 + `node --test`」；**没有 lint/typecheck/formatter**，
-  改完必须自己跑单测 + esbuild（下面）
+- `.github/workflows/ci.yml` 在 push main / PR 上跑「版本一致性 + `node --test` + 注册表 validate/check」；
+  **没有 lint/typecheck/formatter**，改完必须自己跑单测 + esbuild（见下）
 - 使用方安装/升级（`opencode plugin` 子命令实测存在，`packages/cli/src/commands/commands.ts:269-311`）：
   `opencode plugin add @justsilver/opencode-providers` / `opencode plugin update <配置里那串原样>` / `opencode plugin remove …`
-- 细节与出处见 `docs/npm-distribution-and-testing.md`
+- **完整发版流程**（`npm version`、打 tag、Actions 勾选、人工首发 runbook、tarball 传播延迟）
+  见 `CONTRIBUTING.md`「发版」与 `docs/npm-distribution-and-testing.md`
 
 # 运行与验证
 
-- 单测：`node --test`（Node ≥ 22 原生 TS strip，零依赖；含 `scripts/changelog.mjs` 的工具测试与
+- 单测：`node --test`（Node ≥ 24；含 `scripts/changelog.mjs` 的工具测试与
   `tests/setup.test.ts` —— 走**真 server 入口 + 真注册表 + 假 ctx** 钉住「拉到什么就注册什么」的链路）
 - 真机冒烟（HTTP，不需要 TUI）：`node scripts/smoke-api.mjs --list` / `node scripts/smoke-api.mjs`
   （鉴权自动读 `~/.local/state/opencode/service.json`；`models` 场景会写一条临时凭据再删，只碰「当前无凭据」的 supplier）
-- 入口打包/语法检查（esbuild，`Done in` 即通过）：
+- 入口打包/语法检查（esbuild，`Done in` 即通过；TUI 入口的注入包必须标 `--external`，否则解析失败 exit 1）：
   ```
-  npx --yes esbuild plugin/opencode-providers/index.ts --bundle --platform=node --format=esm \
-    --outfile=dist/providers-server.js            # server 入口无外部依赖，不需要 --external
-  npx --yes esbuild plugin/opencode-providers/tui.ts --bundle --platform=node --format=esm \
-    --external:@opencode/plugin/tui --outfile=dist/providers-tui.js   # 注入包必须标 external，否则 esbuild 解析失败（实测 exit 1）
+  npx --yes esbuild plugin/opencode-providers/index.ts --bundle --platform=node --format=esm --outfile=dist/providers-server.js
+  npx --yes esbuild plugin/opencode-providers/tui.ts --bundle --platform=node --format=esm --external:@opencode/plugin/tui --outfile=dist/providers-tui.js
   ```
 - npm 打包预检（不发布）：`npm pack --dry-run`（确认 `plugin/**/*.ts` + CHANGELOG 进了 tarball）
 - **本地目录插件**通常无需重启：改源码被文件监视热重载（实测 `/api/plugin` 立刻变为 `status=active`）；必要时再 `opencode service restart`
-- 验证注册真的生效：**一条命令** `node scripts/smoke-api.mjs`（对照下面的手工证据链）
-  ```
-  opencode api get  /api/plugin       # 自己那条必须 state.status=active、features.server/tui=true；**多于 1 条 = 同 id 被发现两次**
-  opencode api get  /api/integration  # methods 有 key、metadata.source=opencode-providers
-  opencode api get  /api/model        # 只列可用 provider 的模型（无凭据时 0 条）
-  opencode api get  /api/provider     # activation=auto / package / integrationID / settings.baseURL
-  opencode api post /api/integration/<id>/connect/key --data '{"key":"sk-test"}'
-  opencode api delete /api/credential/<cred_id>     # 验证完清理，别留假凭据
-  ```
+- **验证注册真的生效**：一条命令 `node scripts/smoke-api.mjs`；手工证据链（`/api/plugin|integration|model|provider`
+  + 临时凭据）与「怎么判定插件加载了」见 `CONTRIBUTING.md`
 - 注册表没生效时先看 `/api/plugin` 的 `state.status`，再看 server 日志里的 `failed to load plugin ... cause=`
 - **同一插件 id 被发现两次就会有一条 `failed`**：npm 包（或本地目录插件）与某个项目的 `.opencode/plugins/` 里那份撞名时，
   按 boot 顺序**首见者生效**、后者在 `/api/plugin` / `/plugins` 面板里显示 `failed` + `Duplicate plugin ID: <id>`。
@@ -150,11 +136,13 @@
   手改 JSON 并自己推算 `revision`；有技能时 **0 直读、全程走 CLI**（连「改名」也用 `remove-*` + `add-*`）。
   基线另暴露：CLI 最小字段铁律下「改名」会丢掉 `keyLabel` 等历史字段 → 技能已注明「停下向用户说明、别手改」。
 
-# 文档索引（docs/）
+# 文档索引
 
-- `opencode-commands.md` —— 内置命令 vs 插件命令、同名冲突语义、插件注册命令/对话框的可用 API
-- `opencode-connect-custom-provider.md` —— `/connect` 数据来源、凭据存哪/如何注入、目录 TTL、自维护注册表怎么抄 models.dev
-- `opencode-plugin-provider-no-config.md` —— 零 `opencode.json` 的证据链、`activation` 语义、注册表缓存的
+- `CONTRIBUTING.md` —— **开发者入口**：本地开发 / 架构要点 / 测试与验证 / 注册表维护 / 发版流程 / 约定
+- `README.md` —— 使用者文档（安装 / 使用 / 疑难解答）
+- `docs/opencode-commands.md` —— 内置命令 vs 插件命令、同名冲突语义、插件注册命令/对话框的可用 API
+- `docs/opencode-connect-custom-provider.md` —— `/connect` 数据来源、凭据存哪/如何注入、目录 TTL、自维护注册表怎么抄 models.dev
+- `docs/opencode-plugin-provider-no-config.md` —— 零 `opencode.json` 的证据链、`activation` 语义、注册表缓存的
   位置/TTL/重拉条件、**模型列表怎么进 `/model`（四层链路）**、撞名「各管一半」、探针注册表验证法
-- `npm-distribution-and-testing.md` —— npm 包形态/预发布发布策略（OIDC、dist-tag、正式版手动流程）、TUI 不写 JSX 的根因、
+- `docs/npm-distribution-and-testing.md` —— npm 包形态/预发布发布策略（OIDC、dist-tag、正式版手动流程）、TUI 不写 JSX 的根因、
   `scripts/smoke-api.mjs` 冒烟姿势与「怎么判定插件到底加载没加载」
