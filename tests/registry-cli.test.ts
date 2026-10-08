@@ -1,9 +1,9 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import test from "node:test"
+import test, { after } from "node:test"
 import { fileURLToPath } from "node:url"
 
 import { registryView, escapeRe, need } from "./helpers/shipped.ts"
@@ -27,6 +27,12 @@ const ANCHOR_LIMIT = { context: 1000, output: 100 }
 const ANCHOR_BASE_LIMIT = { context: 500, output: 50 }
 const ANCHOR_URL = "https://api.zz-anchor.test/v1"
 
+/** 测试用的临时目录统一登记，收尾清理（别把残留留在机器上）。 */
+const TEMP_DIRS: string[] = []
+after(() => {
+  for (const dir of TEMP_DIRS) rmSync(dir, { recursive: true, force: true })
+})
+
 /**
  * 复制一份随仓 registry 目录树，再补上一个**锚点供应商**，写坏也不污染仓库。
  *
@@ -36,6 +42,7 @@ const ANCHOR_URL = "https://api.zz-anchor.test/v1"
  */
 function freshRoot(): string {
   const dir = mkdtempSync(join(tmpdir(), "opencode-registry-"))
+  TEMP_DIRS.push(dir)
   const root = join(dir, "registry")
   cpSync(SHIPPED_ROOT, root, { recursive: true })
   seedAnchors(root)

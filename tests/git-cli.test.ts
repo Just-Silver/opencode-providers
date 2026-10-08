@@ -1,15 +1,26 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs"
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import test from "node:test"
+import test, { after } from "node:test"
 import { fileURLToPath } from "node:url"
 
 const CLI = fileURLToPath(
   new URL("../.opencode/skills/opencode-providers-registry/scripts/registry.mjs", import.meta.url),
 )
 const SHIPPED_ROOT = fileURLToPath(new URL("../registry", import.meta.url))
+
+/** 建在系统临时目录、收尾统一清理，不把测试残留留在机器上。 */
+const TEMP_DIRS: string[] = []
+after(() => {
+  for (const dir of TEMP_DIRS) rmSync(dir, { recursive: true, force: true })
+})
+function mktemp(prefix: string) {
+  const dir = mkdtempSync(join(tmpdir(), prefix))
+  TEMP_DIRS.push(dir)
+  return dir
+}
 
 /** 提交/推送类命令不是「注册表数据」操作，用随仓无关的全新供应商驱动，钉住 git 行为。 */
 const NEW_ID = "zz-git-new"
@@ -39,7 +50,7 @@ function addProvider(root: string) {
 
 /** 临时副本 + `git init` + 一次初始提交；副本在系统临时目录，不碰仓库。 */
 function freshGitRepo() {
-  const dir = mkdtempSync(join(tmpdir(), "opencode-registry-git-"))
+  const dir = mktemp("opencode-registry-git-")
   cpSync(SHIPPED_ROOT, join(dir, "registry"), { recursive: true })
   git(dir, ["init", "-q", "-b", "main"])
   git(dir, ["config", "core.autocrlf", "false"])
@@ -52,7 +63,7 @@ function freshGitRepo() {
 
 /** 建一个裸仓库当 origin，并让工作副本的 main 已跟踪它。 */
 function withBareRemote(dir: string) {
-  const remote = mkdtempSync(join(tmpdir(), "opencode-registry-remote-"))
+  const remote = mktemp("opencode-registry-remote-")
   git(remote, ["init", "-q", "--bare", "-b", "main"])
   git(dir, ["remote", "add", "origin", remote])
   git(dir, ["push", "-q", "-u", "origin", "main"])
@@ -121,7 +132,7 @@ test("commit -m：短别名等价于 --message（不被当成位置参数静默�
 })
 
 test("commit：不在 git 仓库里时报错", () => {
-  const dir = mkdtempSync(join(tmpdir(), "opencode-registry-nogit-"))
+  const dir = mktemp("opencode-registry-nogit-")
   cpSync(SHIPPED_ROOT, join(dir, "registry"), { recursive: true })
 
   const result = cli(["commit"], join(dir, "registry"))
