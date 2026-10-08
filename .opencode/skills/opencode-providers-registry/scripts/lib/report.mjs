@@ -89,16 +89,43 @@ export function printResult(providers, shared, json) {
   printSharedModels(shared)
 }
 
+/** 宽松匹配用的归一化：小写，把 `. _ / \ 空白 :` 折成 `-`，去首尾 `-`。 */
+export function normalizeKey(value) {
+  return String(value)
+    .toLowerCase()
+    .replace(/[._\/\\\s:]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+}
+
+/** 归一化后分词，丢掉纯数字与单字符 token（版本号/噪声不参与宽松召回）。 */
+function significantTokens(normalized) {
+  return normalized.split("-").filter((token) => token.length >= 2 && !/^\d+$/.test(token))
+}
+
+/**
+ * 宽松匹配（**召回优先**，故意不严格）：归一化后整体互为子串，或查询的任一「显著 token」命中候选字段。
+ * 因为宽松，命中**可能多个**——由技能用 `multiple` 的 `question` 让用户二次确认真实家族。
+ */
+export function matchesQuery(query, fields) {
+  const normalized = normalizeKey(query)
+  if (!normalized) return false
+  const tokens = significantTokens(normalized)
+  return fields
+    .filter((field) => field !== undefined && field !== null && field !== "")
+    .some((field) => {
+      const target = normalizeKey(field)
+      if (target === "") return false
+      if (target.includes(normalized) || normalized.includes(target)) return true
+      return tokens.some((token) => target.includes(token))
+    })
+}
+
 export function matchesModel(model, query) {
-  return [model.key, model.modelID, model.name]
-    .filter(Boolean)
-    .some((field) => String(field).toLowerCase().includes(query))
+  return matchesQuery(query, [model.key, model.modelID, model.name])
 }
 
 export function matchesShared(row, query) {
-  return [row.ref, row.name, row.family]
-    .filter(Boolean)
-    .some((field) => String(field).toLowerCase().includes(query))
+  return matchesQuery(query, [row.ref, row.name, row.family])
 }
 
 export function reportFailure(root, problems) {

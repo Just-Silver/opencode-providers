@@ -144,6 +144,31 @@ test("search 命中供应商名/模型 key；未命中退出码 1", () => {
   assert.match(miss.stdout, /没有匹配/)
 })
 
+test("search 宽松（归一化 + token）匹配：大小写 / 分隔符 / 词序 / 厂商前缀都能命中", () => {
+  const root = freshRoot()
+  const hits = (q: string) => {
+    const result = cli(["search", q], root)
+    assert.equal(result.status, 0, `${q} → ${result.stderr}`)
+    return result.stdout
+  }
+
+  // canon ref 是 anchor/base-model：大写 + 下划线（`/`、`_` 与 `-` 等价）
+  assert.match(hits("ANCHOR/BASE_MODEL"), new RegExp(escapeRe(ANCHOR_BASE)))
+  // 点号分隔也应命中同一 canon
+  assert.match(hits("Anchor.Base.Model"), new RegExp(escapeRe(ANCHOR_BASE)))
+  // 词序颠倒（token 匹配，不是子串匹配）
+  assert.match(hits("shared anchor"), new RegExp(escapeRe(ANCHOR_BASE_ONLY)))
+  // 带厂商前缀的上游 modelID 形态（`vendor/model`）也应命中该模型 key
+  assert.match(hits("somevendor/anchor-shared"), new RegExp(escapeRe(ANCHOR_BASE_ONLY)))
+  // 宽松召回：命中可能不止一个（多个候选交给用户二次确认）
+  const broad = cli(["search", "anchor"], root)
+  assert.equal(broad.status, 0, broad.stderr)
+  const matched = [ANCHOR_BASE, ANCHOR_BASE_ONLY, ANCHOR_OVERRIDE, ANCHOR_INLINE].filter((token) =>
+    broad.stdout.includes(token),
+  )
+  assert.ok(matched.length >= 2, `「anchor」应召回多个候选，实际：${matched.join(", ")}`)
+})
+
 test("show 单看一个供应商/模型；不存在报错", () => {
   const root = freshRoot()
   const view = registryView(root)

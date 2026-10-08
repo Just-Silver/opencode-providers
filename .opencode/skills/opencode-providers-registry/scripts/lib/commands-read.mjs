@@ -9,7 +9,7 @@ import { parseRegistry } from "../../../../../plugin/opencode-providers/registry
 import { CliError, checkBaseRef, lastOf, rejectUnknownFlags } from "./cli.mjs"
 import { assemble, computeRevision, loadTree, parseTree, providerDirs, resolveRoot } from "./store.mjs"
 import { comparableFields, findIdenticalShared, sameValue } from "./spec.mjs"
-import { matchesModel, matchesShared, printResult, reportFailure, summarize, summarizeShared } from "./report.mjs"
+import { matchesModel, matchesQuery, matchesShared, printResult, reportFailure, summarize, summarizeShared } from "./report.mjs"
 
 export function commandList(flags) {
   rejectUnknownFlags("list", flags, new Set())
@@ -25,7 +25,7 @@ export function commandSearch(positional, flags) {
   const shared = summarizeShared(registry).filter((row) => matchesShared(row, query))
   const rows = []
   for (const row of summarize(registry)) {
-    const providerHit = row.id.toLowerCase().includes(query) || String(row.name).toLowerCase().includes(query)
+    const providerHit = matchesQuery(query, [row.id, row.name])
     const models = providerHit ? row.models : row.models.filter((model) => matchesModel(model, query))
     if (providerHit || models.length > 0) rows.push({ ...row, models })
   }
