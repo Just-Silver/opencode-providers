@@ -1,7 +1,7 @@
 # 设计：注册表的 lab 模型层（canon / provider 两层）
 
 - 日期：2026-10-08
-- 状态：待复核
+- 状态：**已批准**（2026-10-08 用户确认：全部按推荐；破坏性、不兼容旧数据/旧代码）
 - 影响面：`.opencode/skills/opencode-providers-registry/`（SKILL.md + CLI）、`registry/` 数据、`tests/`、`AGENTS.md`、`CONTRIBUTING.md`
 - 破坏性：**是**。不兼容旧命令语义，不迁移旧行为（只迁移本仓现有数据）
 
