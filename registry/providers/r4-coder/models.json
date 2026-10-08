@@ -3,35 +3,6 @@
     "base": "deepseek/deepseek-v4.1-flash"
   },
   "kimi-k3": {
-    "name": "Kimi K3",
-    "limit": {
-      "context": 1048576,
-      "output": 131072
-    },
-    "variants": [
-      {
-        "id": "low",
-        "settings": {
-          "reasoningEffort": "low"
-        }
-      },
-      {
-        "id": "high",
-        "settings": {
-          "reasoningEffort": "high"
-        }
-      },
-      {
-        "id": "max",
-        "settings": {
-          "reasoningEffort": "max"
-        }
-      }
-    ],
-    "input": [
-      "text",
-      "image",
-      "video"
-    ]
+    "base": "kimi/kimi-k3"
   }
 }
