@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.3.2-beta.0] - 2026-10-08
+
 ### Added
 
 - 注册表维护 CLI（`.opencode/skills/opencode-providers-registry/`）扩展：
@@ -24,6 +26,18 @@
   （本地开发 / 架构要点 / 测试与验证 / 注册表维护 / 发版流程 / 约定）；`AGENTS.md` 的发版与验证细节收敛为要点并指向
   `CONTRIBUTING.md`。另按全局「文档标准与约束」落地：`AGENTS.md` 建立「文档地图」（文档 → 负责 / 不写，唯一索引），
   `CONTRIBUTING.md` 只留一行链接；各文档顶部加职责声明；`docs/specs`、`docs/plans` 标记历史冻结。
+
+### Fixed
+
+- **`/connect-providers` 强制刷新后模型 / 供应商列表不更新**：刷新成功只失效了 `integration` 列表，
+  而 TUI 的模型选择器读的是 `ctx.data.location.model`，它**只被 `model.updated` 事件**驱动失效。
+  服务端那条链（`Provider` → `Model` → `model.updated`）只从 `Integration.Event.Updated` / 凭据事件起跳，
+  所以**给已有供应商加模型**时（integration 集合没变）链路不发 → 选择器一直显示旧模型
+  （新增一家供应商才正常，故只在「已有供应商加模型」时暴露）。
+  改为刷新后由客户端主动失效并重取 **`integration` / `model` / `provider` 三件套**（`reloadCatalog`），
+  不再依赖事件链。证据：`packages/core/src/provider.ts`（`Provider.notify` 只订阅 Integration/Credential）、
+  `packages/core/src/model.ts`（订阅 `Provider.Event.Updated` 后发 `model.updated`）、
+  `packages/tui/src/context/data.ts`（`model.updated` → 失效重取 `location.model`）
 
 ## [0.3.1] - 2026-10-07
 
