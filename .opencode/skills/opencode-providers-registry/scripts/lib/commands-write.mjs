@@ -11,7 +11,6 @@ import {
   loadTree,
   parseTree,
   providerDir,
-  requireShared,
   resolveRoot,
   sharedModelPath,
   syncManifest,
@@ -40,6 +39,7 @@ export function commandSync(flags) {
 const ADD_PROVIDER_FLAGS = new Set([
   "id", "name", "baseurl", "package", "protocol", "model",
   "model-name", "model-id", "context", "output", "variant", "base", "force", "input",
+  "lab", "lab-key", "inline",
 ])
 
 export function commandAddProvider(flags) {
@@ -67,21 +67,22 @@ export function commandAddProvider(flags) {
   }
 
   const modelKey = checkId(required(flags, "model", "首个模型 key"), "模型 key")
-  const base = lastOf(flags, "base")
-  if (base !== undefined) requireShared(tree, base)
-  const spec = buildModelSpec(flags, { key: modelKey, allowBase: true })
+  const { canon, providerSpec } = resolveModelSource(tree, flags, { key: modelKey })
 
   const provider = { name, package: packageName, ...(baseURL === undefined ? {} : { baseURL }) }
+  const shared = canon ? new Map([...tree.shared, [canon.ref, canon.spec]]) : tree.shared
   // 落盘前校验整棵树。
-  parseTree({ ...tree, providers: [...tree.providers, { id, provider, models: { [modelKey]: spec } }] })
+  parseTree({ ...tree, providers: [...tree.providers, { id, provider, models: { [modelKey]: providerSpec } }], shared })
 
   writeJsonFile(join(providerDir(root, id), "provider.json"), provider)
-  writeJsonFile(join(providerDir(root, id), "models.json"), { [modelKey]: spec })
+  if (canon) writeJsonFile(sharedModelPath(root, canon.ref), canon.spec)
+  writeJsonFile(join(providerDir(root, id), "models.json"), { [modelKey]: providerSpec })
   syncManifest(root)
 
-  console.log(`✓ 已添加供应商 "${id}"（${name}，${packageName}，1 个模型：${modelKey}）`)
+  if (canon) console.log(`✓ 已添加供应商 "${id}"（${name}，${packageName}）并建共享模型 "${canon.ref}"，首个模型 "${modelKey}" 引用它`)
+  else console.log(`✓ 已添加供应商 "${id}"（${name}，${packageName}，1 个模型：${modelKey}）`)
   console.log(`  写入 ${providerDir(root, id)}/ 与 ${join(root, "index.json")}`)
-  reportReuseHint(tree, spec)
+  reportReuseHint(tree, providerSpec)
 }
 
 const ADD_MODEL_FLAGS = new Set([

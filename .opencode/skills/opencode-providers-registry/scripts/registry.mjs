@@ -53,8 +53,9 @@ const USAGE = `分文件注册表维护 CLI —— agent 不要直接读整份�
   写（增）：
     node scripts/registry.mjs add-provider --id ID --name 名称 --baseurl URL \\
         [--protocol chat|responses|messages | --package PKG] \\
-        --model KEY [--model-name 名称] [--model-id 上游id] \\
-        [--context N --output N] [--variant id[:settingsJSON]] [--base lab/model] [--force] \\
+        --model KEY (--lab LAB [--lab-key NAME] | --base lab/model | --inline) \\
+        [--model-name 名称] [--model-id 上游id] \\
+        [--context N --output N] [--variant id[:settingsJSON]] [--force] \\
         [--input text,image,...]
     node scripts/registry.mjs add-model --provider ID --key KEY \\
         (--lab LAB [--lab-key NAME] | --base lab/model | --inline) \\

@@ -191,6 +191,7 @@ test("add-provider 建分文件、index 追加 id、revision 改变、validate �
       "--baseurl", "https://api.example-prov.test/v1",
       "--protocol", "chat",
       "--model", "example-chat",
+      "--inline",
       "--model-name", "Example Chat",
       "--model-id", "example-chat-v1",
       "--context", "131072",
@@ -336,7 +337,7 @@ test("add-shared-model --lab/--key 写 models/<lab>/<key>.json；重复冲突", 
 
 test("add-provider baseURL 占用 → 报错；--force 放行（评审 C）", () => {
   const root = freshRoot()
-  const args = ["add-provider", "--id", "dup-url", "--name", "Dup", "--baseurl", ANCHOR_URL, "--model", "m", "--context", "1", "--output", "1"]
+  const args = ["add-provider", "--id", "dup-url", "--name", "Dup", "--baseurl", ANCHOR_URL, "--model", "m", "--inline", "--context", "1", "--output", "1"]
   const conflicted = cli(args, root)
   assert.equal(conflicted.status, 1)
   assert.match(conflicted.stderr, new RegExp(`已被供应商 "${escapeRe(ANCHOR_ID)}" 使用`))
@@ -392,7 +393,7 @@ test("CLI 健壮性：--base-url 是 --baseurl 的别名；未知参数必须报
     [
       "add-provider",
       "--id", "aliasprov", "--name", "Alias", "--base-url", "https://api.alias.example/v1",
-      "--model", "m", "--context", "1", "--output", "1",
+      "--model", "m", "--inline", "--context", "1", "--output", "1",
     ],
     root,
   )
@@ -468,7 +469,7 @@ test("I1：单段字段不许含 /；--base 恰好两段", () => {
 test("I2：add-provider 未给 --model-name 时不把供应商名当模型名", () => {
   const root = freshRoot()
   const result = cli(
-    ["add-provider", "--id", "newprov", "--name", "New Provider", "--model", "m", "--context", "1", "--output", "1"],
+    ["add-provider", "--id", "newprov", "--name", "New Provider", "--model", "m", "--inline", "--context", "1", "--output", "1"],
     root,
   )
   assert.equal(result.status, 0, result.stderr)
@@ -480,7 +481,7 @@ test("能力多选：--input 写 input 模态", () => {
   const result = cli(
     [
       "add-provider",
-      "--id", "vision", "--name", "Vision", "--model", "v1",
+      "--id", "vision", "--name", "Vision", "--model", "v1", "--inline",
       "--context", "1000", "--output", "100",
       "--input", "text,image",
     ],
@@ -687,4 +688,40 @@ test("复用共享模型：add-provider --base 只写 base/modelID（不重复 l
     "reuse-model": { base: ANCHOR_BASE, modelID: "upstream/reuse" },
   })
   assert.equal(cli(["validate"], root).status, 0)
+})
+
+test("add-provider 不带来源 → 报错", () => {
+  const root = freshRoot()
+  const result = cli(["add-provider", "--id", "np", "--name", "NP", "--model", "m", "--context", "1", "--output", "1"], root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /必须指定模型来源/)
+})
+
+test("add-provider --lab 建 canon + provider 引用", () => {
+  const root = freshRoot()
+  const lab = freshLab(root)
+  const result = cli(
+    ["add-provider", "--id", "np", "--name", "NP", "--baseurl", "https://api.np.test/v1",
+     "--model", "glm-5", "--lab", lab, "--model-name", "GLM-5", "--context", "200000", "--output", "32000"],
+    root,
+  )
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(readJson(file(root, "providers", "np", "models.json")), { "glm-5": { base: `${lab}/glm-5` } })
+  assert.deepEqual(readJson(file(root, "models", lab, "glm-5.json")), {
+    name: "GLM-5",
+    limit: { context: 200000, output: 32000 },
+  })
+})
+
+test("add-provider --base 复用已有 canon（只写 base/modelID）", () => {
+  const root = freshRoot()
+  const result = cli(
+    ["add-provider", "--id", "reuse2", "--name", "Reuse2", "--baseurl", "https://api.reuse2.test/v1",
+     "--model", "m", "--base", ANCHOR_BASE, "--model-id", "up/m"],
+    root,
+  )
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(readJson(file(root, "providers", "reuse2", "models.json")), {
+    m: { base: ANCHOR_BASE, modelID: "up/m" },
+  })
 })
