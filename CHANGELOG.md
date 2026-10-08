@@ -7,6 +7,19 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **技能 CLI：`add-provider` / `add-model` 现在必须声明模型来源（破坏性）**——`--lab <lab>`（建家族 canon
+  `registry/models/<lab>/<model>.json`，参数写进 canon、provider 层只写 `base`）/ `--base <lab>/<model>`（复用已有 canon）/
+  `--inline`（本家独有，必须自带 limit）。**取消原来的「默认内联」**：不给来源直接报错。判据是「能不能说出造它的 lab」，
+  **独家代理 ≠ 本家独有**。技能在 `search` 没命中任何 canon 时会先问「家族标签（lab）」，不再默认内联。
+- 注册表数据：`kimi-k3` 提升为共享模型 `kimi/kimi-k3`，`r4-coder` 改为 `base` 引用。
+
+### Added
+
+- 技能 CLI：`--lab-key`（canon 文件名与 provider key 可不同）；`check` 新增「参数完全相同的两个 canon（重复家族）」提醒；
+  `remove-provider` / `remove-model` 后**自动清理无人引用的 canon**（并清空空 lab 目录）。
+
 ## [0.3.2-beta.1] - 2026-10-08
 
 ### Fixed

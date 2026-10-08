@@ -228,8 +228,8 @@ registry/
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs list
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search <关键词>
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs show <id>
-node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-provider ...
-node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model ...
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-provider ...   # 模型来源三选一
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model ...      # 同上
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-shared-model ...
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs set-provider|set-model|set-shared-model ...
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs remove-provider|remove-model|remove-shared-model ...
@@ -238,13 +238,15 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs validate
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs check [--strict]
 ```
 
-- **新增模型前先 `search`**：命中已有的顶层共享模型就用 `add-*/--base <lab>/<model>` **复用**（不必逐项重写 limit/变体/模态）。
-- `check [--strict]` 做更全体检：悬空 `base` 引用 / 孤儿共享模型 / 重复 baseURL / `input` 缺 text / 空目录。
+- **新增模型必须声明来源（三选一）**：`--lab <lab>` 建家族 canon（能说出造它的 lab 时；参数进 canon）、`--base <lab>/<model>` 复用已有 canon（**新增前先 `search`，命中就用**）、`--inline` 本家独有（必须自带 limit）。没命中时技能会先问「家族标签 lab」——**不许自己编 lab、不许默认内联**。
+- **provider 层 override-only**：`--lab` 时 provider 只写 `base`（+ 可选 `modelID`）；`--base` 时给 `--context/--output` 是写在该 provider 的**覆盖**（canon 不动）。
+- `check [--strict]` 做更全体检：悬空 `base` 引用 / 孤儿共享模型 / **参数完全相同的两个 canon（重复家族）** / 重复 baseURL / `input` 缺 text / 空目录。
+- 删除（`remove-provider` / `remove-model`）后**自动清理无人引用的 canon**（并清空空 lab 目录）。
 - 写命令结束会**自动重算并重写** `index.json`；手改了子文件就用 `sync` 补齐，再 `validate`。
 - `revision` = `providers/**` + `models/**` 全部文件按 posix 相对路径排序后的确定性哈希。
 
-> **红线（给 agent）**：禁止直接读整份注册表（会随规模变大），查/改全走 CLI。完整路由
-> （新增供应商 / 给已有供应商加模型 / 复用共享模型，及一次性 `question` 模板）见
+> **红线（给 agent）**：禁止直接读整份注册表（会随规模变大），查/改全走 CLI；`add-*` 必带来源（`--lab` / `--base` / `--inline`），
+> 没命中就问「家族标签 lab」，**不许自己编 lab、不许默认内联**。完整流程（新增供应商 / 加模型 / 复用共享模型，及一次性 `question` 模板）见
 > `.opencode/skills/opencode-providers-registry/SKILL.md`。
 
 ## 发版
