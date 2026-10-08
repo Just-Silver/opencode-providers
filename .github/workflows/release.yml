@@ -135,9 +135,15 @@ jobs:
           else
             tag="v$(node -p "require('./package.json').version")"
           fi
-          echo "→ Release $tag"
+          # 版本含 `-`（如 0.3.2-beta.0）= 预发布 → GitHub Release 标 prerelease。
+          version="$(node -p "require('./package.json').version")"
+          case "$version" in
+            *-*) prerelease="--prerelease" ;;
+            *)   prerelease="" ;;
+          esac
+          echo "→ Release $tag（prerelease=${prerelease:-false}）"
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release edit "$tag" --title "$tag" --notes-file release-notes.md
+            gh release edit "$tag" --title "$tag" --notes-file release-notes.md $prerelease
           else
-            gh release create "$tag" --title "$tag" --notes-file release-notes.md
+            gh release create "$tag" --title "$tag" --notes-file release-notes.md $prerelease
           fi

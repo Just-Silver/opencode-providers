@@ -33,5 +33,12 @@
       "image",
       "video"
     ]
+  },
+  "test-refresh-probe": {
+    "name": "Test Refresh Probe",
+    "limit": {
+      "context": 131072,
+      "output": 8192
+    }
   }
 }
