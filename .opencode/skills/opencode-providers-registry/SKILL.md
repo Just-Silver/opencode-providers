@@ -9,7 +9,7 @@ description: Use when adding or changing providers or models in this repository'
 + `registry/providers/<id>/provider.json`（供应商参数）+ `registry/providers/<id>/models.json`（该家模型）
 + 顶层共享模型 `registry/models/<lab>/<model>.json`。`index.json` 与 `revision` 由 CLI 自动维护，**人手不碰**。
 插件运行期从 GitHub raw 拉 manifest，按 `revision` 决定要不要重拉各分文件、聚合成一份（6h TTL + `ETag` + 失败沿用旧缓存）。
-**改数据不需要发插件版本**，但要让运行中的实例跟上：`git push origin main` → 触发一次插件重载
+**改数据不需要发插件版本**，但要让运行中的实例跟上：`node … commit --push` 推到 `origin main` → 触发一次插件重载
 （重启 / 或在 `/connect-providers` 弹窗里按 `Ctrl+R` 强制刷新），否则最多等 6h。
 
 > 结构照 **models.dev 的源头那层**：`registry/models/<lab>/<model>.json` ≡ models.dev 的 `models/<lab>/<model>.toml`
@@ -41,6 +41,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
 | `add-provider …` / `add-model …`（**必带来源 `--lab` / `--base` / `--inline`**）/ `add-shared-model …` | 新增（冲突直接报错） |
 | `set-provider …` / `set-model …` / `set-shared-model …` | 改参数：**字段补丁**（只改传入的，未传保持）+ `--unset a,b` 清空 |
 | `remove-provider …` / `remove-model …` / `remove-shared-model …` | 删除（见「路由」里的安全约束）；删后**自动清理无人引用的 canon** |
+| `commit [-m 信息] [--push]` / `push` | **git 交给脚本**：`commit` 按改动自动生成中文提交信息、**只暂存并提交 `registry/**`**（不误伤其他改动）、提交前过 `validate` 级校验；`--push` 顺带推 `origin` 当前分支，`push` 单独推 |
 
 只看不写先跑 `list`；**新增/改之前先 `search`**。**所有写命令在落盘前都会重跑 `parseRegistry`，冲突/非法一律退出码 1 且不写文件。**
 （调试/演练可用 `--root <注册表目录>` 指向一份副本，不动仓库里的注册表。）
@@ -482,12 +483,26 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 
 **能说出造它的 lab 的模型，一律 `--lab` 建 canon**（不等复用）；只有**本家独有 / 无可归属 lab** 才 `--inline` 内联。别把「只有一家在卖」当内联理由——**独家代理 ≠ 本家独有**。
 
+## 提交与推送（git 由脚本负责）
+
+**不要手打 git 命令**——`git add -A` 会误收仓库里的无关改动，提交信息也会飘。改完交给脚本：
+
+```bash
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs commit --push
+```
+
+- `commit`：**只暂存并提交注册表根（`registry/**`）**，其他已暂存文件原样留着；提交前先跑 `validate` 级校验（不通过**不提交**），并按改动**自动生成中文提交信息**（新增/删除/更新供应商或模型、共享模型…；多条写命令**合成一次提交**）。
+- `push`：推送 `origin` 当前分支；`commit --push` = 提交后立即推。
+- **推送是显式动作**：建议 `commit` 与 `push` 分开跑，中间留出 `node --test` 复验——测试若失败，本地 `reset`/`amend` 即可，远端与 CI 不受影响；一次性用 `commit --push` 也可以。
+- `-m "…"` 覆盖自动提交信息（一般不用）。
+- **副本演练不提交**：`--root` 指向不在 git 仓库里的副本时，`commit`/`push` 会直接明确报错。
+
 ## 步骤（每次改完都要走完）
 
 1. **先查（含搜共享模型）**：`node … search "<模型 key / 名称 / 上游 modelID>"` —— 命中共享模型走 C（`--base`）；没命中就问「家族标签（lab）」，据此定 `--lab` / `--inline`；并核对现有参数
 2. **再写**：`add-provider` / `add-model`（**必带来源：`--lab` / `--base` / `--inline`**）/ `add-shared-model`；改/删用 `set-*` / `remove-*`（冲突/非法会报错、不会落盘；删除会自动清理无人引用的 canon）
 3. **自查**：`node … check`（悬空引用/孤儿/重复…）→ `node … validate`（组装 + schema + index/目录/revision 一致）→ `node --test`
-4. `git add -A && git commit -m "…"`（**中文**）→ `git push origin main`
+4. **提交/推送交给脚本**（别手打 git）：`node … commit --push` —— 只提交 `registry/**`、自动生成中文提交信息、提交前过校验；想先本地留一手（如提交后再复验）就拆成 `node … commit` → `node … push`
 5. 让运行中的实例生效：重启 opencode（或在 `/connect-providers` 里按 `Ctrl+R` 强制刷新）
 6. 验证：
    ```bash
@@ -496,7 +511,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
    opencode api get /api/model         # 在 /connect-providers 粘 key 后，模型数与 limit/modelID 对得上
    ```
 
-> **只是在副本上演练时**（所有命令都带 `--root <副本目录>`）：跳过上面的 `node --test`（它跑的是**仓库**注册表，对副本无意义）、`git commit/push`、触发重载与 curl/opencode 验证——副本不参与运行期；演练完删掉副本，别留在机器上。
+> **只是在副本上演练时**（所有命令都带 `--root <副本目录>`）：跳过上面的 `node --test`（它跑的是**仓库**注册表，对副本无意义）、`commit`/`push`（副本不在 git 仓库里，`commit` 会明确报错）、触发重载与 curl/opencode 验证——副本不参与运行期；演练完删掉副本，别留在机器上。
 
 ## 常见错误
 
@@ -520,3 +535,8 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 | `add-*` 报「只能给一个」 | `--lab` / `--base` / `--inline` 同时给了；只留一个 |
 | 共享模型「说没就没了」 | 删除最后一个引用者时 CLI **自动清理**了无人引用的 canon（并清空空 lab 目录）；要留就别先删引用方 |
 | `check` 提醒「参数完全相同的共享模型」 | 两个 canon 参数一模一样（可能重复家族）；确认后 `remove-shared-model` 删其一 |
+| `commit` 报「不在 git 仓库里」 | `--root` 指向的是不在任何 git 工作树里的副本；副本演练本来就跳过提交，别在副本上 `commit` |
+| `commit` 报「没有要提交的注册表改动」 | 工作区与 HEAD 一致（没改，或已经提交过）；确认写命令真的落盘了 |
+| `commit` 报「提交前校验未通过」 | 改动没通过 `validate` 级校验（如手改了 `index.json`/`revision`）；先 `validate` / `sync` 修好再提交 |
+| 只想本地提交、暂时不推 | 用 `commit`（不带 `--push`），稍后再 `push`（或直接在弹窗 `Ctrl+R` 前补推） |
+| `commit` 提交信息不理想 | 自动信息按 diff 归类；个别措辞不合意就 `-m "…"` 覆盖（**别**因此回去手打 `git add -A`） |

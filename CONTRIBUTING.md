@@ -142,7 +142,7 @@ opencode api delete /api/credential/<cred_id>     # 验证完清理，别留假�
 
 ## 维护注册表
 
-源在 `registry/`（`index.json` manifest + `providers/**` + `models/**`）。改完提交后，**下一次插件被加载**时才会跟上：
+源在 `registry/`（`index.json` manifest + `providers/**` + `models/**`）。改完用技能 CLI 的 `commit --push` 提交并推送后，**下一次插件被加载**时才会跟上：
 加载时若缓存已超过 6 小时（TTL）就重新拉取。插件**没有后台定时器**，所以一个连着跑很久的服务不会自己刷新 ——
 想立刻生效就在 `/connect-providers` 弹窗里按 `Ctrl+R`（Force refresh），或 `opencode service restart`。
 拉取先抓 manifest（`ETag`）；`revision` 与缓存一致就不重拉子文件，变了才并发拉各分文件并重新聚合；
@@ -236,6 +236,8 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs remove-pr
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs sync
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs validate
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs check [--strict]
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs commit [--push]   # 提交（自动中文信息，只提交 registry/**），--push 顺带推
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs push               # 单独推 origin 当前分支
 ```
 
 - **新增模型必须声明来源（三选一）**：`--lab <lab>` 建家族 canon（能说出造它的 lab 时；参数进 canon）、`--base <lab>/<model>` 复用已有 canon（**新增前先 `search`；它是宽松召回**——归一化 + token，可能命中多个、也可能只是「相似但不同」→ **用可多选（`multiple`）的 `question` 让用户二次确认，模糊命中不标「推荐」**）、`--inline` 本家独有（必须自带 limit）。没命中时技能会先问「家族标签 lab」（选项**动态列出已有 lab** + 本家独有 / 新建，**支持多选**）——**不许自己编 lab、不许默认内联**。
@@ -243,6 +245,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs check [--
 - `check [--strict]` 做更全体检：悬空 `base` 引用 / 孤儿共享模型 / **参数完全相同的两个 canon（重复家族）** / 重复 baseURL / `input` 缺 text / 空目录。
 - 删除（`remove-provider` / `remove-model`）后**自动清理无人引用的 canon**（并清空空 lab 目录）。
 - 写命令结束会**自动重算并重写** `index.json`；手改了子文件就用 `sync` 补齐，再 `validate`。
+- **提交/推送也走脚本**（别手打 `git add -A`）：`commit` 只暂存并提交 `registry/**`（其他已暂存文件原样留着）、按改动自动生成中文提交信息、提交前过 `validate` 级校验；`commit --push` / `push` 推 `origin` 当前分支。建议 `commit` 与 `push` 分开跑，中间用 `node --test` 复验（测试失败只影响本地）。
 - `revision` = `providers/**` + `models/**` 全部文件按 posix 相对路径排序后的确定性哈希。
 
 > **红线（给 agent）**：禁止直接读整份注册表（会随规模变大），查/改全走 CLI；`add-*` 必带来源（`--lab` / `--base` / `--inline`），

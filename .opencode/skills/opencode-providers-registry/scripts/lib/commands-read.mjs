@@ -75,19 +75,18 @@ export function commandShow(positional, flags) {
   console.log(JSON.stringify({ ...entry.provider, models: entry.models }, null, 2))
 }
 
-export function commandValidate(flags) {
-  rejectUnknownFlags("validate", flags, new Set())
-  const root = resolveRoot(flags)
+/**
+ * 组装 + schema + index/目录/revision 一致性；返回 `{ tree, registry, problems }`。
+ * 供 `validate` 打印、`commit` 落盘前守卫两处复用（单一事实源）。
+ */
+export function collectValidationProblems(root) {
   let tree
   let registry
   try {
     tree = loadTree(root)
     registry = parseTree(tree)
   } catch (error) {
-    if (error instanceof CliError) {
-      reportFailure(root, [error.message])
-      return
-    }
+    if (error instanceof CliError) return { problems: [error.message] }
     throw error
   }
 
@@ -101,6 +100,13 @@ export function commandValidate(flags) {
   if (expected !== tree.manifest.revision) {
     problems.push(`revision 不一致：index=${tree.manifest.revision} 实际=${expected}（跑一次 sync 修正）`)
   }
+  return { tree, registry, problems }
+}
+
+export function commandValidate(flags) {
+  rejectUnknownFlags("validate", flags, new Set())
+  const root = resolveRoot(flags)
+  const { tree, registry, problems } = collectValidationProblems(root)
   if (problems.length > 0) {
     reportFailure(root, problems)
     return

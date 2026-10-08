@@ -40,6 +40,7 @@ import {
   commandSetSharedModel,
   commandSync,
 } from "./lib/commands-write.mjs"
+import { commandCommit, commandPush } from "./lib/commands-git.mjs"
 
 const USAGE = `分文件注册表维护 CLI —— agent 不要直接读整份注册表，用这些命令：
 
@@ -83,6 +84,8 @@ const USAGE = `分文件注册表维护 CLI —— agent 不要直接读整份�
 
   其它：
     node scripts/registry.mjs sync                           # 手改子文件后重算 revision + 重写 index.json
+    node scripts/registry.mjs commit [-m 信息] [--push]      # 提交（自动生成中文信息，只提交注册表路径）
+    node scripts/registry.mjs push                           # 推送当前分支到 origin
 
 通用：--root <注册表目录>；--json。`
 
@@ -102,6 +105,10 @@ function run(argv) {
       return commandCheck(flags)
     case "sync":
       return commandSync(flags)
+    case "commit":
+      return commandCommit(flags)
+    case "push":
+      return commandPush(flags)
     case "add-provider":
       return commandAddProvider(flags)
     case "add-model":
