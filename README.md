@@ -3,6 +3,8 @@
 给 [OpenCode](https://opencode.ai) 补上**模型目录里没有的供应商**：一份自维护的注册表 + 一个插件。
 装完插件、在 `/connect-providers` 里贴一次 API Key 就能用 —— **不需要写 `opencode.json`**。
 
+> **职责**（使用者）：安装 / 使用 / 疑难解答。开发 / 架构 / 发版见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
 ## 为什么需要它
 
 OpenCode 的供应商清单来自 models.dev 目录，**目录里没有的供应商不会出现在 `/connect`**。

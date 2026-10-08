@@ -22,7 +22,8 @@
 
 - **文档按读者拆分**：`README.md` 收敛为使用者内容（安装 / 使用 / 疑难解答）；新增 `CONTRIBUTING.md` 作开发者入口
   （本地开发 / 架构要点 / 测试与验证 / 注册表维护 / 发版流程 / 约定）；`AGENTS.md` 的发版与验证细节收敛为要点并指向
-  `CONTRIBUTING.md`。
+  `CONTRIBUTING.md`。另按全局「文档标准与约束」落地：`AGENTS.md` 建立「文档地图」（文档 → 负责 / 不写，唯一索引），
+  `CONTRIBUTING.md` 只留一行链接；各文档顶部加职责声明；`docs/specs`、`docs/plans` 标记历史冻结。
 
 ## [0.3.1] - 2026-10-07
 

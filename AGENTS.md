@@ -5,6 +5,8 @@
 
 现状：`0.3.1` 是**正式版**（npm `latest`，OIDC 发布 + provenance）；预发布在 `next`。
 
+> **职责**（AI agent）：硬约束 / 坑 / 命令 + 文档地图。完整流程步骤见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+
 # 语言规则
 
 - 全程中文沟通；`git commit` 用中文。
@@ -136,13 +138,17 @@
   手改 JSON 并自己推算 `revision`；有技能时 **0 直读、全程走 CLI**（连「改名」也用 `remove-*` + `add-*`）。
   基线另暴露：CLI 最小字段铁律下「改名」会丢掉 `keyLabel` 等历史字段 → 技能已注明「停下向用户说明、别手改」。
 
-# 文档索引
+# 文档地图
 
-- `CONTRIBUTING.md` —— **开发者入口**：本地开发 / 架构要点 / 测试与验证 / 注册表维护 / 发版流程 / 约定
-- `README.md` —— 使用者文档（安装 / 使用 / 疑难解答）
-- `docs/opencode-commands.md` —— 内置命令 vs 插件命令、同名冲突语义、插件注册命令/对话框的可用 API
-- `docs/opencode-connect-custom-provider.md` —— `/connect` 数据来源、凭据存哪/如何注入、目录 TTL、自维护注册表怎么抄 models.dev
-- `docs/opencode-plugin-provider-no-config.md` —— 零 `opencode.json` 的证据链、`activation` 语义、注册表缓存的
-  位置/TTL/重拉条件、**模型列表怎么进 `/model`（四层链路）**、撞名「各管一半」、探针注册表验证法
-- `docs/npm-distribution-and-testing.md` —— npm 包形态/预发布发布策略（OIDC、dist-tag、正式版手动流程）、TUI 不写 JSX 的根因、
-  `scripts/smoke-api.mjs` 冒烟姿势与「怎么判定插件到底加载没加载」
+唯一索引：写内容前先查此表；新文档必须在同一次改动里登记（一行一篇，只登记顶层入口）。
+
+| 文档 | 负责 | 不写 |
+|---|---|---|
+| `README.md` | 使用者：安装 / 使用 / 疑难解答 | 开发 / 架构 / 发版 |
+| `CONTRIBUTING.md` | 贡献者：本地开发 / 架构 / 测试 / 注册表维护 / 发版 | 使用教程 |
+| `AGENTS.md` | agent：硬约束 / 坑 / 命令 + 本表 | 完整流程步骤（链 CONTRIBUTING） |
+| `docs/opencode-commands.md` | opencode 命令系统（通用知识） | 本插件用法 |
+| `docs/opencode-connect-custom-provider.md` | opencode `/connect` 与自定义供应商（通用知识） | 本插件安装 |
+| `docs/opencode-plugin-provider-no-config.md` | 本插件「零配置」设计与证据 | opencode 通用教程 |
+| `docs/npm-distribution-and-testing.md` | 本项目 npm 分发 / 测试实践 | 注册表数据 |
+| `docs/specs/`、`docs/plans/` | 历史设计 / 计划（只读冻结） | 新内容 |

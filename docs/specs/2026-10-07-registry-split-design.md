@@ -1,5 +1,7 @@
 # registry 拆分：按供应商分文件 + 运行期聚合 + 强制刷新
 
+> **历史冻结**：2026-10-07 的设计文档，只读、不回填、不当现状。
+
 - 日期：2026-10-07
 - 状态：**设计已批准**（`docs/plans/2026-10-07-registry-split.md` 为实现计划）
 - 相关：`docs/opencode-plugin-provider-no-config.md`、`docs/npm-distribution-and-testing.md`、`.opencode/skills/opencode-providers-registry/`

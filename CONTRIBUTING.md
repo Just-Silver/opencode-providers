@@ -1,7 +1,8 @@
 # 贡献指南
 
+> **职责**（贡献者）：本地开发 / 架构 / 测试 / 注册表维护 / 发版。使用者文档见 [README.md](./README.md)。
+
 `opencode-providers` 欢迎贡献。本文面向**开发者**：改插件代码、维护注册表数据、发版。
-只想**使用**插件请看 [README.md](./README.md)；AI agent 的项目硬约束见 [AGENTS.md](./AGENTS.md)。
 
 ## 可以怎么贡献
 
@@ -32,7 +33,7 @@ plugin/opencode-providers/             ← 插件源码（npm 包的 server / tu
 .opencode/skills/opencode-providers-registry/   ← 维护注册表的技能与 CLI
 scripts/                               ← changelog.mjs（版本/发布说明）、smoke-api.mjs（真机冒烟）
 tests/                                 ← node --test 用例
-docs/                                  ← 深度参考（见「文档索引」）
+docs/                                  ← 深度参考（见「文档地图」）
 ```
 
 > 源码**故意不放在 `.opencode/plugins/` 下**：那是 opencode 的自动发现根，放在那里会让「在本仓库里跑 opencode」
@@ -273,14 +274,6 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs check [--
 - 相对导入带显式扩展名；**不留死代码**（声明了却没人用的 export / 可达不到的钩子都算）。
 - 临时文件/探针用完清理，别留在用户机器上（探针注册表还要删掉它留下的 `kv` 缓存行）。
 
-## 文档索引
+## 文档地图
 
-- [README.md](./README.md) —— 使用者文档（安装 / 使用 / 疑难解答）
-- [AGENTS.md](./AGENTS.md) —— AI agent 的项目硬约束（结构 / 设计约束 / 收尾纪律 / 技能）
-- `docs/opencode-commands.md` —— opencode 内置命令 vs 插件命令、同名冲突语义、插件注册命令/对话框的可用 API
-- `docs/opencode-connect-custom-provider.md` —— `/connect` 数据来源、凭据存哪/如何注入、目录 TTL、自维护注册表怎么抄 models.dev
-- `docs/opencode-plugin-provider-no-config.md` —— 零 `opencode.json` 的证据链、`activation` 语义、注册表缓存位置/TTL/重拉条件、
-  模型列表进 `/model` 的四层链路、撞名「各管一半」、探针注册表验证法
-- `docs/npm-distribution-and-testing.md` —— npm 包形态 / 预发布策略（OIDC、dist-tag、正式版手动流程）、
-  TUI 不写 JSX 的根因、`smoke-api.mjs` 冒烟姿势与「怎么判定插件到底加载没加载」
-- `docs/specs/`、`docs/plans/` —— 历史设计文档与实现计划
+本仓各文档的职责（哪份负责什么 / 不写什么）见 [AGENTS.md 的「文档地图」](./AGENTS.md#文档地图)——唯一索引，此处不重复。

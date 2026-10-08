@@ -1,5 +1,7 @@
 # registry 拆分（分供应商文件 + 运行期聚合 + 强制刷新）Implementation Plan
 
+> **历史冻结**：本次改动的实现计划，已执行完毕，只读、不回填、不当现状。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 把注册表从单文件改成「按供应商分目录的 JSON 源」，插件运行期聚合 + kv 缓存（6h TTL），并在 `/connect-providers` 弹窗加「强制刷新」。
