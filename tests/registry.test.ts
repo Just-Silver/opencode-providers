@@ -42,10 +42,10 @@ test("真实模型：共享 base + 各自 modelID 覆盖（走注册用的 build
   const commandCode = buildProviderModels(registry, "command-code", registry.providers["command-code"]!)
   const r4 = buildProviderModels(registry, "r4-coder", registry.providers["r4-coder"]!)
   assert.equal(commandCode.length, 1)
-  assert.equal(r4.length, 1)
+  assert.ok(r4.length >= 1)
 
   const cc = commandCode[0]!
-  const r4m = r4[0]!
+  const r4m = r4.find((model) => model.id === "deepseek-v4.1-flash")!
   for (const model of [cc, r4m]) {
     assert.equal(model.id, "deepseek-v4.1-flash")
     assert.equal(model.name, "Deepseek V4.1 Flash")
@@ -60,4 +60,12 @@ test("真实模型：共享 base + 各自 modelID 覆盖（走注册用的 build
   // command-code 覆盖了发往上游的真实 id；r4-coder 用默认（= map key）
   assert.equal(cc.modelID, "deepseek/deepseek-v4.1-flash")
   assert.equal(r4m.modelID, "deepseek-v4.1-flash")
+
+  // r4-coder 另有内联模型：内联 limit 原样落地，且不带共享 base
+  const kimi = r4.find((model) => model.id === "kimi-k3")
+  if (kimi) {
+    assert.equal(kimi.name, "Kimi K3")
+    assert.equal(kimi.modelID, "kimi-k3")
+    assert.deepEqual(kimi.limit, { context: 1048576, output: 131072 })
+  }
 })

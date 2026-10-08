@@ -429,14 +429,25 @@ test("set-shared-model：补丁只改传入字段，并提示引用方", () => {
 
 test("remove-model：拒绝删唯一模型；可删多模型之一", () => {
   const root = freshRoot()
-  const only = cli(["remove-model", "--provider", "r4-coder", "--key", "deepseek-v4.1-flash"], root)
-  assert.equal(only.status, 1)
-  assert.match(only.stderr, /唯一的模型/)
-
+  // 先删到只剩一个，再删最后一个必须被拒（不依赖随仓某家恰好只有一个模型）
   assert.equal(cli(["add-model", "--provider", "r4-coder", "--key", "extra", "--context", "1", "--output", "1"], root).status, 0)
   const removed = cli(["remove-model", "--provider", "r4-coder", "--key", "extra"], root)
   assert.equal(removed.status, 0, removed.stderr)
   assert.equal("extra" in readJson(file(root, "providers", "r4-coder", "models.json")), false)
+
+  while (true) {
+    const models = readJson(file(root, "providers", "r4-coder", "models.json")) as Record<string, unknown>
+    const keys = Object.keys(models)
+    if (keys.length === 1) {
+      const last = cli(["remove-model", "--provider", "r4-coder", "--key", keys[0]!], root)
+      assert.equal(last.status, 1, `删唯一模型 ${keys[0]} 应被拒绝`)
+      assert.match(last.stderr, /唯一的模型/)
+      break
+    }
+    const dropped = cli(["remove-model", "--provider", "r4-coder", "--key", keys[0]!], root)
+    assert.equal(dropped.status, 0, dropped.stderr)
+  }
+  assert.equal(Object.keys(readJson(file(root, "providers", "r4-coder", "models.json"))).length, 1)
 })
 
 test("remove-provider：删目录 + 从 index 移除；拒绝删唯一供应商", () => {
