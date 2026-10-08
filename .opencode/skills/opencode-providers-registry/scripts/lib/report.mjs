@@ -31,7 +31,8 @@ export function summarizeShared(registry) {
     for (const spec of Object.values(provider.models ?? {})) {
       if (!spec.base) continue
       const list = usedBy.get(spec.base) ?? []
-      list.push(id)
+      // 同一家可有多个模型引用同一 canon；引用方按**供应商**去重，别出现 "r4-coder, r4-coder"
+      if (!list.includes(id)) list.push(id)
       usedBy.set(spec.base, list)
     }
   }

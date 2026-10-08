@@ -126,6 +126,18 @@ test("list 打印供应商与模型，不吐整份 JSON", () => {
   for (const ref of view.sharedRefs()) assert.match(result.stdout, new RegExp(escapeRe(ref)))
 })
 
+test("list --json：共享模型的引用方按供应商去重（同家多个模型引用同一 canon 只列一次）", () => {
+  const root = freshRoot()
+  const result = cli(["list", "--json"], root)
+  assert.equal(result.status, 0, result.stderr)
+  const data = JSON.parse(result.stdout) as { sharedModels: Array<{ ref: string; usedBy: string[] }> }
+
+  // 锚点里 anchor-shared 与 anchor-override 都引用同一 canon → 引用方应只有 zz-anchor 一个
+  const shared = data.sharedModels.find((row) => row.ref === ANCHOR_BASE)
+  assert.ok(shared, `锚点共享模型 ${ANCHOR_BASE} 应出现在列表里`)
+  assert.deepEqual(shared.usedBy, [ANCHOR_ID])
+})
+
 test("search 命中供应商名/模型 key；未命中退出码 1", () => {
   const root = freshRoot()
   const view = registryView(root)
