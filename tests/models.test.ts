@@ -72,7 +72,7 @@ test("buildProviderModels maps shared facts and provider overrides", () => {
   assert.deepEqual(second.cost, [{ input: 3, output: 4, cache: { read: 0, write: 0 } }])
 })
 
-test("buildProviderModels defaults tools to true and modality to text", () => {
+test("buildProviderModels defaults tools to true、input 兜底 text+image、output 兜底 text（与内核一致）", () => {
   const parsed = parseRegistry({
     schemaVersion: 1,
     models: {},
@@ -84,7 +84,7 @@ test("buildProviderModels defaults tools to true and modality to text", () => {
   if (!parsed.ok) return
   const [model] = buildProviderModels(parsed.registry, "acme", parsed.registry.providers.acme)
   assert.ok(model)
-  assert.deepEqual(model.capabilities, { tools: true, input: ["text"], output: ["text"] })
+  assert.deepEqual(model.capabilities, { tools: true, input: ["text", "image"], output: ["text"] })
   assert.deepEqual(model.cost, [])
   assert.deepEqual(model.variants, [])
   assert.equal(model.time.released, 0)

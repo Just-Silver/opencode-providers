@@ -56,7 +56,8 @@ export function buildProviderModels(
       ...(Object.keys(compatibility).length === 0 ? {} : { compatibility }),
       capabilities: {
         tools: resolved.tools ?? true,
-        input: resolved.input ?? ["text"],
+        // 与 opencode 内核 `Model.Info.default()` 一致（packages/schema/src/model.ts）：缺省 input = text+image。
+        input: resolved.input ?? ["text", "image"],
         output: resolved.output ?? ["text"],
       },
       variants: (resolved.variants ?? []).map((variant) =>

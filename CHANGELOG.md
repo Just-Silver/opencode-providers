@@ -15,6 +15,7 @@
 - 技能：澄清「**精确命中不用问**，直接 `--base`；**模糊命中（多个/相似）**才用 `"multiple"` 的 `question` 二次确认」；「改名」限定为 **id/key（标识）**（**显示名**走 `set-provider --name` / `set-model --model-name`）；判定供应商是否存在**用 `show <id>`**（`search` 是宽松召回，同 token 会假阳性）；`set-model` / `set-shared-model` **不能补 `variants`**。
 - 技能 CLI：`search` 改为**宽松匹配（召回优先）**——归一化（大小写、`. _ / \` 与 `-` 等价、词序无关、忽略版本数字）+ token，**一次搜索可能召回多个候选**。
 - 技能：命中**分档**——归一化后相等才 `--base`；**召回多个 / 相似但不同**（如 `glm-5` vs `glm-5-air`）→ 用 `"multiple": true` 的 `question` 把候选动态列出让用户**二次确认**（**模糊命中不标「推荐」**）；无命中的「家族标签（lab）」题**动态列出已有 lab** 且**支持多选**；并明确**跨步骤不得沿用上一步的 lab**。
+- 插件：模型**输入模态兜底 `["text"]` → `["text","image"]`**，与 opencode 内核 `Model.Info.default()`（`packages/schema/src/model.ts`）一致；注册表未写 `input` 的模型从此默认支持图片，**纯文本模型必须显式写 `input: ["text"]`**（技能 CLI 传 `--input text`），`output` 兜底仍为 `["text"]`。
 
 ## [0.3.2] - 2026-10-08
 
