@@ -346,7 +346,8 @@ export function commandRemoveSharedModel(flags) {
   if (referrers.length > 0) {
     throw new CliError(
       `共享模型 "${ref}" 仍被引用：${referrers.join(", ")}。\n` +
-        `  先用 set-model --provider <id> --key <key> --unset base（或 remove-model）解除引用，再删——否则会留下未知 base`,
+        `  推荐用 remove-model --provider <id> --key <key> 删掉引用方；` +
+        `要保留它就 set-model --unset base 并同时补齐 name/limit —— 纯 base 引用直接 --unset base 会留下无 limit 的非法模型`,
     )
   }
 

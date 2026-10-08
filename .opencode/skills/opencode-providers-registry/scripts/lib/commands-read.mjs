@@ -27,7 +27,7 @@ export function commandSearch(positional, flags) {
   for (const row of summarize(registry)) {
     const providerHit = matchesQuery(query, [row.id, row.name])
     const models = providerHit ? row.models : row.models.filter((model) => matchesModel(model, query))
-    if (providerHit || models.length > 0) rows.push({ ...row, models })
+    if (providerHit || models.length > 0) rows.push({ ...row, models, providerHit })
   }
   if (rows.length === 0 && shared.length === 0) {
     if (flags.json === true) console.log(JSON.stringify({ providers: [], sharedModels: [] }, null, 2))

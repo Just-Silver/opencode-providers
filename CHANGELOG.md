@@ -10,6 +10,9 @@
 ### Changed
 
 - 技能 CLI：`list` / `list --json` 的**顶层共享模型引用方按供应商去重**（同一家多个模型引用同一 canon 时，不再出现 `r4-coder, r4-coder`）。
+- 技能 CLI：`search` 输出给**供应商 id/名称命中**加标记 `〔供应商 id/名称命中〕`，与「仅其名下模型命中」区分。
+- 技能 CLI：`remove-shared-model` 的**拒绝文案**改为**推荐 `remove-model`**，并说明「纯 `base` 引用直接 `--unset base` 会留下无 limit 的非法模型」。
+- 技能：澄清「**精确命中不用问**，直接 `--base`；**模糊命中（多个/相似）**才用 `"multiple"` 的 `question` 二次确认」；「改名」限定为 **id/key（标识）**（**显示名**走 `set-provider --name` / `set-model --model-name`）；判定供应商是否存在**用 `show <id>`**（`search` 是宽松召回，同 token 会假阳性）；`set-model` / `set-shared-model` **不能补 `variants`**。
 - 技能 CLI：`search` 改为**宽松匹配（召回优先）**——归一化（大小写、`. _ / \` 与 `-` 等价、词序无关、忽略版本数字）+ token，**一次搜索可能召回多个候选**。
 - 技能：命中**分档**——归一化后相等才 `--base`；**召回多个 / 相似但不同**（如 `glm-5` vs `glm-5-air`）→ 用 `"multiple": true` 的 `question` 把候选动态列出让用户**二次确认**（**模糊命中不标「推荐」**）；无命中的「家族标签（lab）」题**动态列出已有 lab** 且**支持多选**；并明确**跨步骤不得沿用上一步的 lab**。
 

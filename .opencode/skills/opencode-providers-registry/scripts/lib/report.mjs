@@ -51,7 +51,9 @@ function printProviders(rows) {
   if (rows.length === 0) return
   console.log(`${rows.length} 个供应商：\n`)
   for (const row of rows) {
-    console.log(`${row.id} (${row.name}) · ${row.package} · ${row.baseURL ?? "(无 baseURL)"} · ${row.models.length} 个模型`)
+    // `search` 会区分「供应商 id/名称命中」与「模型命中」，避免把供应商命中误读成可 --base 的共享模型候选
+    const hit = row.providerHit ? "  〔供应商 id/名称命中〕" : ""
+    console.log(`${row.id} (${row.name}) · ${row.package} · ${row.baseURL ?? "(无 baseURL)"} · ${row.models.length} 个模型${hit}`)
     for (const model of row.models) {
       const parts = [`→ ${model.modelID}`]
       if (model.limit) parts.push(`ctx=${model.limit.context} out=${model.limit.output}`)

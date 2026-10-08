@@ -58,7 +58,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 
 | search 结果 | 处理 |
 |---|---|
-| **与某 canon/模型归一化后相等**（同一个模型） | 直接 `--base <lab>/<model>` 复用 |
+| **与某 canon/模型归一化后相等**（同一个模型） | **不用提问**，直接 `--base <lab>/<model>` 复用 |
 | **召回多个 / 相似但不同** | **用 `"multiple": true` 的 `question` 把候选动态列出**，让用户**二次确认**要复用哪个（或都不复用）——**别自作主张，也别给模糊命中标「推荐」** |
 | **无命中** | 走下面的「来源三选一」（先问「家族标签（lab）」） |
 
@@ -107,21 +107,24 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 |---|---|---|
 | **A 新增供应商** | 这家还不存在于注册表 | 供应商 id、显示名称、协议（→ package）、baseURL，**外加首个模型（含来源三选一：家族标签 lab）** |
 | **B 给已有供应商加模型** | 供应商已在注册表，只加模型 | 模型 key、显示名称、**来源三选一（家族标签 lab / `--base` / `--inline`）**、上游 `modelID`、`limit`、变体 |
-| **C 复用已有共享模型** | 「铁律 1」的 `search` 命中顶层共享模型 | 供应商信息（仅 A）+ 模型 key + 用哪个共享模型 + 可选 `modelID` 覆盖 |
-| **改** | 改供应商/模型/共享模型参数 | 用 `set-*`（字段补丁 + `--unset`） |
+| **C 复用已有共享模型** | `search` **模糊命中**顶层共享模型（召回多个 / 相似）→ **提问二次确认**；**精确命中（归一化相等）不用问，直接 `--base`** | 供应商信息（仅 A）+ 模型 key + 用哪个共享模型 + 可选 `modelID` 覆盖 |
+| **改** | 改供应商/模型/共享模型参数（**含显示名**：`set-provider --name` / `set-model --model-name`） | 用 `set-*`（字段补丁 + `--unset`） |
 | **删** | 删供应商/模型/共享模型 | 用 `remove-*`（安全约束见下） |
 
 > 路由 A 必须带**一个模型**：注册表 schema 要求每个 provider 的 `models` 非空，脚本也据此拒绝空模型。
-> 先 `list`/`search` 确认这家还不存在；已存在就走路由 B，别重复建供应商（会撞 id 报错）。
+> 确认这家还不存在要**用 `show <id>` 判定**（不存在会明确报错）——别只看 `search`：它是**宽松召回**，别家同 token 也会被命中，不等于这家存在（例：搜 `kimi-gw` 会因 token `kimi` 召回 `kimi-k3`，而 `kimi-gw` 并不存在）。已存在就走路由 B，别重复建供应商（撞 id 会报错）。
 
 删除的安全约束（CLI 强制）：
 
 - `remove-model`：不许删某家**最后一个**模型（会变空，schema 不允许）→ 要删整家用 `remove-provider`。
 - `remove-provider`：不许删注册表里**最后一个**供应商。
-- `remove-shared-model`：**仍被 `base` 引用就拒绝**（悬空引用会让那家在插件里被整家跳过）；先 `set-model --unset base`（或 `remove-model`）解除引用再删。
+- `remove-shared-model`：**仍被 `base` 引用就拒绝**（悬空引用会让那家在插件里被整家跳过）。解除引用二选一：
+  **删掉引用它的那个模型**用 `remove-model`（**推荐**——纯 `base` 引用的模型没有自己的 limit，`--unset base` 会留下**无 limit 的非法模型**）；
+  确实要保留该模型才用 `set-model --provider <id> --key <key> --unset base`，并**同时补齐** `--model-name` / `--context` / `--output`（否则仍非法）。
 
-> 没有独立的「改名」命令：改名 = `remove-*` + `add-*`。注意**只保留 CLI 能表达的字段**（name/package/baseURL/models/模型的 `base` 等）；
-> `keyLabel` 之类历史遗留字段会随旧条目消失——遇到就**向用户说明**，别手改 JSON 补回。
+> **改「显示名」不用 remove+add**：`set-provider --name` / `set-model --model-name` / `set-shared-model --model-name` 即可（保留其它字段，包括 `keyLabel`）。
+> 没有独立的「重命名 **id / key（标识）**」命令：改 provider id 或 model key = `remove-*` + `add-*`——**只保留 CLI 能表达的字段**
+> （name/package/baseURL/models/模型的 `base` 等），`keyLabel` 之类历史遗留字段会随旧条目消失；遇到就**向用户说明**，别手改 JSON 补回。
 
 不在本技能范围：改插件代码 / 加 `env` 认证。
 
@@ -130,7 +133,8 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 调用 `question` 工具，把下面模板**整段复制**到 `questions` 数组里；**用户已经给出的字段，从数组里删掉对应问题**，
 其余问题原样保留（不要改措辞、不要改顺序、不要新增问题）——这样每次提问都一致。
 
-> 先跑「铁律 1」的 `search`：**命中且用户选了复用 → 用下面的路由 C 模板，并从 A/B 模板里删掉所有模型参数问题**
+> 先跑「铁律 1」的 `search`：**精确命中（归一化相等）** → **不用问**，直接 `--base`（及需要时 `--model-id`）。
+> **模糊命中（召回多个 / 相似）** → 用下面的**路由 C 模板**把候选动态列出、让用户二次确认；用户选了复用后，再从 A/B 模板里删掉所有模型参数问题
 > （key / 名称 / `modelID` / `limit` / 变体 / 输入模态），只在路线 A 时保留供应商信息问题。**没命中** → 才用 A/B 模板逐项问。
 
 ### 路由 A：新增供应商
@@ -315,7 +319,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 }
 ```
 
-### 路由 C：复用已有共享模型（`search` 命中时）
+### 路由 C：模糊命中时二次确认复用（**精确命中不用问，直接 `--base`**）
 
 **动态选项模板**（lab 题见下，同样动态）：把 `search` 宽松召回的候选**逐条**填进 `options`，不要照搬占位文字。
 
@@ -400,6 +404,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs remove-sh
 - `--model-id` 省略（或等于 key）就不写 `modelID`；`--model-name` 省略就不写 `name`（**不会**拿供应商名顶替）。
 - 模型与某个已存在的**顶层共享模型**参数一致时，用 `add-*/--base <lab>/<model>` 引用（铁律 1 / 路线 C），别复制一份；`--inline` 写入且参数与某 canon 相同时，CLI 会打一行「可改用 `--base` 复用」的软提示。
 - `add-provider` 的 `--baseurl` 若已被别家占用会报错，确属有意才加 `--force`。
+- **`set-model` / `set-shared-model` 不能补 `variants`**（`variants` 只在 `add-*` 有入口）：要给已有模型加/改变体，用 `remove-model` + `add-model`（`--inline`/`--lab`/`--base`）重建。
 
 ## 铁律：只用最小字段（由 CLI 强制）
 
@@ -506,7 +511,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs add-model
 | 变体不生效 | `settings` 必须在 `variants[].settings`，不是模型级 `settings` |
 | CLI 报「供应商已存在」/「已存在模型」 | `add-*` 不覆盖：该走路由 B 或换 key；要改/删用 `set-*` / `remove-*`，别手改 JSON |
 | `check` 报「悬空引用」 | 某 provider 的 `base` 指向不存在的共享模型（该家会被运行期整家跳过）；`set-model … --unset base` 或补建该共享模型 |
-| `remove-shared-model` 报「仍被引用」 | 先 `set-model … --unset base`（或 `remove-model`）解除引用，再删 |
+| `remove-shared-model` 报「仍被引用」 | 用 `remove-model` 删掉引用方（**推荐**）；要保留它就 `set-model --unset base` **并补齐 name/limit**（纯 `base` 引用直接 `--unset base` 会变**无 limit 的非法模型**），再删 |
 | `check --strict` 退出码 1 | 有提醒（孤儿共享模型/内联重复/baseURL 重复/`input` 缺 text/空目录）；`--strict` 时提醒也算失败，按提示处理或去掉 `--strict` |
 | CLI 报「未通过 schema 校验」 | 参数组合非法（如 `--base` 指向不存在的共享模型）；按提示改参数重跑（写命令落盘前就校验，失败不写文件） |
 | `validate` 报错但运行期照常 | CLI 是**源码级全量严校验**（连没人引用的共享模型也校验），运行期是**逐家宽松**（坏的那家只跳过、其余照常）；按 CLI 提示修好即可 |

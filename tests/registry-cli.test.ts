@@ -156,6 +156,22 @@ test("search 命中供应商名/模型 key；未命中退出码 1", () => {
   assert.match(miss.stdout, /没有匹配/)
 })
 
+test("search 标注命中来源：供应商 id/名称命中带标记，纯模型命中不带", () => {
+  const root = freshRoot()
+
+  // 供应商命中：查询就是锚点供应商 id
+  const byProvider = cli(["search", ANCHOR_ID], root)
+  assert.equal(byProvider.status, 0, byProvider.stderr)
+  assert.match(byProvider.stdout, /供应商 id\/名称命中/)
+
+  // 纯模型命中：查询只落在某个模型 key 上（token 不碰供应商 id/名称）
+  const modelOnly = ANCHOR_INLINE.replace("anchor-", "")
+  const byModel = cli(["search", modelOnly], root)
+  assert.equal(byModel.status, 0, byModel.stderr)
+  assert.match(byModel.stdout, new RegExp(escapeRe(ANCHOR_INLINE)))
+  assert.doesNotMatch(byModel.stdout, /供应商 id\/名称命中/)
+})
+
 test("search 宽松（归一化 + token）匹配：大小写 / 分隔符 / 词序 / 厂商前缀都能命中", () => {
   const root = freshRoot()
   const hits = (q: string) => {
@@ -703,6 +719,9 @@ test("remove-shared-model：仍被引用则拒绝；无人引用才删并清理�
   const refused = cli(["remove-shared-model", "--ref", ANCHOR_BASE], root)
   assert.equal(refused.status, 1)
   assert.match(refused.stderr, /仍被引用/)
+  // 提示应**推荐** remove-model，而不是把危险的 `--unset base` 排在前面（纯 base 引用会变无 limit 的非法模型）
+  assert.match(refused.stderr, /推荐用 remove-model/)
+  assert.match(refused.stderr, /无 limit 的非法模型/)
 
   assert.equal(cli(["add-shared-model", "--lab", "solo", "--key", "only", "--context", "1", "--output", "1"], root).status, 0)
   const removed = cli(["remove-shared-model", "--ref", "solo/only"], root)
