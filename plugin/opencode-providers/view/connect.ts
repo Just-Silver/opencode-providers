@@ -134,9 +134,9 @@ async function doRefresh(ctx: Context): Promise<boolean> {
       return false
     }
     // `invalidate` alone only drops the sync marker — it does not refetch, so
-    // `list()` would keep returning the stale integrations. `reloadIntegrations`
+    // `list()` would keep returning the stale integrations. `reloadCatalog`
     // also awaits the sync, so the reopened list shows the freshly registered set.
-    await reloadIntegrations(ctx)
+    await reloadCatalog(ctx)
     ctx.ui.toast.show({
       variant: "success",
       message: `Registry refreshed: ${result.providers ?? 0} providers, ${result.models ?? 0} models`,
@@ -314,6 +314,27 @@ async function reloadIntegrations(ctx: Context): Promise<void> {
   } catch {
     // A failed sync still leaves `list()` readable; the next action retries.
   }
+}
+
+/**
+ * Drop every location collection a registry refresh can change, then re-read them.
+ *
+ * A refresh often adds models to an **existing** provider (the integration set stays the
+ * same). The server's `provider.updated` → `model.updated` chain only starts from an
+ * `Integration.Event.Updated` / credential change, so that path never reaches the TUI
+ * model list — the model selector would stay stale until restart. Invalidate the whole
+ * catalog here instead of relying on the event chain.
+ */
+async function reloadCatalog(ctx: Context): Promise<void> {
+  const { integration, model, provider } = ctx.data.location
+  for (const collection of [integration, model, provider]) collection.invalidate(ctx.location)
+  await Promise.all(
+    [integration, model, provider].map((collection) =>
+      collection.sync(ctx.location).catch(() => {
+        // A failed sync still leaves `list()` readable; the next action retries.
+      }),
+    ),
+  )
 }
 
 function ownIntegrations(ctx: Context): IntegrationInfo[] {

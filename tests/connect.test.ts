@@ -29,6 +29,10 @@ function harness(input: {
     refresh: 0,
     invalidate: 0,
     sync: 0,
+    modelInvalidate: 0,
+    modelSync: 0,
+    providerInvalidate: 0,
+    providerSync: 0,
     toast: [] as any[],
     alert: [] as any[],
     selectOptions: [] as any[],
@@ -93,6 +97,23 @@ function harness(input: {
           },
           sync: async () => {
             calls.sync += 1
+          },
+        },
+        // 刷新会同时失效/重取模型与供应商列表（真实 ctx 三者都在）。
+        model: {
+          invalidate: () => {
+            calls.modelInvalidate += 1
+          },
+          sync: async () => {
+            calls.modelSync += 1
+          },
+        },
+        provider: {
+          invalidate: () => {
+            calls.providerInvalidate += 1
+          },
+          sync: async () => {
+            calls.providerSync += 1
           },
         },
       },
@@ -162,14 +183,49 @@ test("forceRefresh 成功：调 rpc.refresh、invalidate + sync、success toast"
           invalidate: () => void (seen.invalidated += 1),
           sync: async () => void (seen.synced += 1),
         },
+        model: {
+          invalidate: () => void (seen.invalidated += 1),
+          sync: async () => void (seen.synced += 1),
+        },
+        provider: {
+          invalidate: () => void (seen.invalidated += 1),
+          sync: async () => void (seen.synced += 1),
+        },
       },
     },
   }
   assert.equal(await forceRefresh(ctx as any), true)
   assert.equal(seen.refresh, 1)
-  assert.equal(seen.invalidated, 1)
-  assert.equal(seen.synced, 1, "刷新后必须 sync，否则 list() 仍是旧数据")
+  assert.equal(seen.invalidated, 3, "integration + model + provider 都要失效")
+  assert.equal(seen.synced, 3, "刷新后必须 sync，否则 list() 仍是旧数据")
   assert.equal(seen.toasts[0]?.variant, "success")
+})
+
+test("forceRefresh 成功：catalog 三件套都失效并重取（否则给已有供应商加模型后 TUI 不刷新）", async () => {
+  const seen = { invalidated: [] as string[], synced: [] as string[] }
+  const collection = (name: string) => ({
+    invalidate: () => void seen.invalidated.push(name),
+    sync: async () => void seen.synced.push(name),
+  })
+  const ctx = {
+    location: {},
+    client: {
+      rpc: () => ({ refresh: async () => ({ ok: true, providers: 1, models: 2, source: "network", fetchedAt: 1 }) }),
+    },
+    ui: { toast: { show: () => {} } },
+    data: {
+      location: {
+        integration: collection("integration"),
+        model: collection("model"),
+        provider: collection("provider"),
+      },
+    },
+  }
+  assert.equal(await forceRefresh(ctx as any), true)
+  // 服务端只发 provider.updated/model.updated 的链路对「给已有 provider 加模型」不可靠，
+  // 所以客户端必须自己把 catalog 三个集合都失效重取。
+  assert.deepEqual(seen.invalidated.toSorted(), ["integration", "model", "provider"])
+  assert.deepEqual(seen.synced.toSorted(), ["integration", "model", "provider"])
 })
 
 test("forceRefresh 失败：error toast、不 invalidate", async () => {
