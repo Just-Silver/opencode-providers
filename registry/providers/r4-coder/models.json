@@ -40,5 +40,12 @@
       "context": 131072,
       "output": 8192
     }
+  },
+  "test-refresh-probe-2": {
+    "name": "Test Refresh Probe 2",
+    "limit": {
+      "context": 65536,
+      "output": 4096
+    }
   }
 }

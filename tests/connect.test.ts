@@ -228,6 +228,26 @@ test("forceRefresh 成功：catalog 三件套都失效并重取（否则给已�
   assert.deepEqual(seen.synced.toSorted(), ["integration", "model", "provider"])
 })
 
+test("forceRefresh 带当前 location 调 RPC（否则只刷服务端默认目录，TUI 所在目录永远不更新）", async () => {
+  const seen = { options: undefined as unknown }
+  const noop = { invalidate: () => {}, sync: async () => {} }
+  const ctx = {
+    location: { directory: "D:\\proj\\demo" },
+    client: {
+      rpc: () => ({
+        refresh: async (_input: unknown, options: unknown) => {
+          seen.options = options
+          return { ok: true, providers: 1, models: 1, source: "network", fetchedAt: 1 }
+        },
+      }),
+    },
+    ui: { toast: { show: () => {} } },
+    data: { location: { integration: noop, model: noop, provider: noop } },
+  }
+  assert.equal(await forceRefresh(ctx as any), true)
+  assert.deepEqual(seen.options, { location: { directory: "D:\\proj\\demo" } })
+})
+
 test("forceRefresh 失败：error toast、不 invalidate", async () => {
   const seen = { toasts: [] as any[], invalidated: 0 }
   const ctx = {

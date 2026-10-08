@@ -127,7 +127,13 @@ export function forceRefresh(ctx: Context): Promise<boolean> {
 
 async function doRefresh(ctx: Context): Promise<boolean> {
   try {
-    const result = await ctx.client.rpc(registryRpc).refresh({})
+    // 注册是**按 location** 的：不限定 location 的 RPC 只会刷新服务端的**默认目录**，
+    // 用户所在的目录会一直停在旧的模型列表（且刷新出来的事件也落在默认目录）。
+    // 所以必须带上当前 location。
+    const directory = ctx.location?.directory
+    const result = await ctx.client
+      .rpc(registryRpc)
+      .refresh({}, directory === undefined ? undefined : { location: { directory } })
     if (!result.ok) {
       const detail = (result.errors ?? ["unknown error"]).join("; ")
       ctx.ui.toast.show({ variant: "error", message: `Registry refresh failed: ${detail}` })

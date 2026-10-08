@@ -117,13 +117,13 @@
   但 provider 的 `activation` 与 `settings.apiKey` 仍是配置那份（`enabled` + 明文 env key）⇒ 模型无凭据也可见、`auto` 语义失效。
   要完全走注册表就删掉配置里那一块；只想用 `{env:…}` 就别写进注册表 —— 同 id 两边只留一边
 - 换注册表 URL / 删注册表条目后要**触发一次重载**才生效（改文件、重装、重启）；URL 404 时插件沿用旧缓存，但**新 key 无缓存时 setup 会直接 return**（插件 active 却注册 0 条）
-- **刷新后必须由本插件客户端主动失效 catalog 三件套**（`integration` / `model` / `provider`），
-  **不能只刷 integration**（`view/connect.ts` 的 `reloadCatalog`）。原因（已实测，2026-10-08）：
-  「给**已有**供应商加模型」时服务端事件链**不可靠** —— core 的 `Provider.notify` 只被 `Integration.Event.Updated`/凭据事件触发
-  （`packages/core/src/provider.ts:432`），`Model` 再订阅 `Provider.Event.Updated` 发 `model.updated`（`model.ts:248`），
-  而 TUI 的模型列表**只认 `model.updated`**（`packages/tui/src/context/data.ts:1212`；integration 列表只认 `provider.updated`）。
-  integration 集合没变 ⇒ 链路不发 ⇒ **选择器一直不刷新**（新增一家供应商则正常，故只在「已有供应商加模型」时暴露）。
-  排查口径：`/api/model` 里有、选择器里没有 ⇒ 就是这个缓存失效遗漏
+- **强制刷新必须带当前 location**（`view/connect.ts` 的 `doRefresh` 传 `{ location: { directory } }`）：
+  **provider/model 注册是按 location 隔离的**，不带 location 的 RPC 只刷服务端的**默认目录**（`/api/location` 返回的那个），
+  用户所在目录的注册一直停在旧状态。现象：`/api/model`（默认目录）里有新模型、选择器里没有。
+  排查口径：**按自己所在目录的 location 调 `/api/model`**，与默认目录逐一对比 —— **两边模型数不同就是这个**。
+  客户端刷新后还要**主动失效并重取 `integration`/`model`/`provider` 三件套**（`reloadCatalog`），不能只刷 integration。
+  注：服务端事件链**是通的**（`provider.updated` / `model.updated` 都会发），但**事件带的是被调用的那个 location**，
+  所以关键是 location 对齐，而不是等事件（2026-10-08 实测纠正过一次错误结论：曾误判为「事件链不发」）
 - 查注册表缓存（只读，最安全；`console.*` 不进 opencode 日志）：
   ```
   node -e "const{DatabaseSync}=require('node:sqlite');const db=new DatabaseSync(process.env.USERPROFILE+'\\.local\\share\\opencode\\opencode.db',{readOnly:true});const ns='plugin:'+[...'opencode-providers'].map(c=>c.charCodeAt(0).toString(16).padStart(4,'0')).join('')+':';for(const r of db.prepare('SELECT key,value FROM kv WHERE key LIKE ?').all(ns+'%')){const v=JSON.parse(r.value);console.log(r.key.slice(ns.length),'|',new Date(v.fetchedAt).toISOString(),'|',v.etag)}"
