@@ -53,6 +53,17 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<模型 key / 显示名 / 上游 modelID>"
 ```
 
+`search` 是**宽松匹配（召回优先）**：归一化（大小写、`. _ / \` 与 `-` 等价、词序无关、忽略版本数字）后**互相包含即命中**——
+所以一次搜索**可能召回多个候选**，也可能召回「**相似但不同**」的模型（如搜 `glm-5` 会召回 `glm-5-air`）。命中必须**分档**：
+
+| search 结果 | 处理 |
+|---|---|
+| **与某 canon/模型归一化后相等**（同一个模型） | 直接 `--base <lab>/<model>` 复用 |
+| **召回多个 / 相似但不同** | **用 `"multiple": true` 的 `question` 把候选动态列出**，让用户**二次确认**要复用哪个（或都不复用）——**别自作主张，也别给模糊命中标「推荐」** |
+| **无命中** | 走下面的「来源三选一」（先问「家族标签（lab）」） |
+
+> **跨步骤不得沿用上一步的 lab**：即使上一步刚确认过 `glm`，这一步没给归属也**必须重新问**（相似 ≠ 同族）。
+
 输出里「**顶层共享模型**」一节就是可复用候选（= `registry/models/<lab>/<model>.json`）。据命中情况分三种，
 **`add-provider` / `add-model` 必须显式声明来源，三者必居其一**（不给就报错）：
 
@@ -63,7 +74,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 | **没命中**，且**本家独有**（私有 beta / 微调 / 无可归属 lab） | `--inline` | 内联写在本供应商里；**必须自带 `--context`/`--output`** |
 
 - **判据是「能不能说出造它的 lab」，不是「有几家在卖」**：**独家代理 ≠ 本家独有**。转售网关卖的第三方模型**要建 canon**。
-- **没命中时，必须用 `question` 问用户「家族标签（lab）」**（见模板）——**不许自己编 lab，也不许默认内联**。用户若在任务里已说清归属（如「这是智谱的模型」）即视为已答；**没给出又无法交互（子代理 / CI）时，把要问的问题写清楚并暂停，别猜**。
+- **没命中时，必须用 `question` 问用户「家族标签（lab）」**（见模板）——**不许自己编 lab，也不许默认内联**。用户若在任务里已说清归属（如「这是智谱的模型」）即视为已答；**没给出又无法交互（子代理 / CI）时，把要问的问题写清楚并暂停，别猜**。lab / 候选题的选项要**动态**（把 `list` 里**已有的 lab** 列成选项）+ 设 `"multiple": true`（**可多选**）。
 - `--lab-key <name>` 让 canon 文件名与 provider 的 key 不同（省略则同名）；canon 已存在同名时 CLI 报错并提示改用 `--base`。
 - **`--lab` 撞已存在的 canon 会报错**（报错信息提示改用 `--base`），照做即可；`--base` 指向不存在的 canon 也会报错；
   `--lab`/`--base`/`--inline` **只能给一个**。
@@ -173,8 +184,10 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
     },
     {
       "header": "家族标签（lab）",
-      "question": "这个模型归属的 lab（家族标签）id 是什么？（决定 canon 落在 models/<lab>/<model>.json；没有可归属的 lab 就选「本家独有」）",
+      "question": "这个模型归属的 lab（家族标签）id 是什么？（**可多选**；决定 canon 落在 models/<lab>/<model>.json；没有可归属的 lab 就选「本家独有」）",
+      "multiple": true,
       "options": [
+        { "label": "复用已有 lab：<lab>", "description": "**动态填入**——把 list 里已有的 lab（如 deepseek、kimi）各列成一条，用完替换本行；一个都没有就删掉本条" },
         { "label": "本家独有（--inline）", "description": "私有 beta / 微调 / 说不出来源 lab —— 内联写在本供应商里（必须自带 limit）" },
         { "label": "新建 lab，请 Type your own 填 lab id", "description": "如 kimi、deepseek；小写字母/数字/._-，不含 / 。建 models/<lab>/<model>.json 家族 canon" }
       ]
@@ -247,8 +260,10 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
     },
     {
       "header": "家族标签（lab）",
-      "question": "这个模型归属的 lab（家族标签）id 是什么？（决定 canon 落在 models/<lab>/<model>.json；没有可归属的 lab 就选「本家独有」）",
+      "question": "这个模型归属的 lab（家族标签）id 是什么？（**可多选**；决定 canon 落在 models/<lab>/<model>.json；没有可归属的 lab 就选「本家独有」）",
+      "multiple": true,
       "options": [
+        { "label": "复用已有 lab：<lab>", "description": "**动态填入**——把 list 里已有的 lab（如 deepseek、kimi）各列成一条，用完替换本行；一个都没有就删掉本条" },
         { "label": "本家独有（--inline）", "description": "私有 beta / 微调 / 说不出来源 lab —— 内联写在本供应商里（必须自带 limit）" },
         { "label": "新建 lab，请 Type your own 填 lab id", "description": "如 kimi、deepseek；小写字母/数字/._-，不含 / 。建 models/<lab>/<model>.json 家族 canon" }
       ]
@@ -302,18 +317,19 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 
 ### 路由 C：复用已有共享模型（`search` 命中时）
 
-**这是唯一的「动态选项」模板**：把 `search` 命中的共享模型逐条填进 `options`（推荐项置顶），不要照搬占位文字。
+**动态选项模板**（lab 题见下，同样动态）：把 `search` 宽松召回的候选**逐条**填进 `options`，不要照搬占位文字。
 
 ```json
 {
   "questions": [
     {
       "header": "复用已有模型",
-      "question": "search 命中以下已有共享模型（见选项）。要直接复用其中一个吗？",
+      "question": "search 宽松召回以下候选（可能不止一个，也可能只是相似）。勾选**与本模型同族**的候选来复用；都不是就选最后一项。",
+      "multiple": true,
       "options": [
-        { "label": "复用 <lab>/<model> (推荐)", "description": "只写 base 引用；只有上游 id 不同才用 --model-id 覆盖；不再问 limit/变体/模态" },
-        { "label": "复用 <另一个命中的 lab/model>", "description": "search 命中的每一项各列一条；没有第二个就删掉这条" },
-        { "label": "不复用，按来源三选一新增", "description": "回到路线 A/B：先问家族标签（--lab / --inline），再问 limit/变体/模态" }
+        { "label": "复用 <lab>/<model>", "description": "search 命中的每一项各列一条。**只有归一化后完全相等才标「推荐」**；相似但不同（如 glm-5 vs glm-5-air）一律不标推荐" },
+        { "label": "复用 <另一个命中的 lab/model>", "description": "命中逐条列出；没有第二条就删掉这条" },
+        { "label": "都不复用，按来源三选一新增", "description": "回到路线 A/B：先问家族标签（--lab / --inline），再问 limit/变体/模态" }
       ]
     }
   ]
