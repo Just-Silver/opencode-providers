@@ -94,6 +94,15 @@ function registryCounts(root: string) {
   return { providers: view.ids().length, models: view.modelCount(), shared: view.sharedCount() }
 }
 
+/** 选一个随仓没有的 lab 名（动态），避免与未来新增的共享模型撞车。 */
+function freshLab(root: string): string {
+  const used = new Set(registryView(root).sharedRefs().map((ref) => ref.split("/")[0]))
+  for (let i = 0; ; i += 1) {
+    const candidate = `zz-lab-${i}`
+    if (!used.has(candidate)) return candidate
+  }
+}
+
 test("list 打印供应商与模型，不吐整份 JSON", () => {
   const root = freshRoot()
   const view = registryView(root)
@@ -240,6 +249,72 @@ test("add-model --base 引用共享模型：只写 base，不用重复 limit", (
     base: ANCHOR_BASE,
   })
   assert.equal(cli(["validate"], root).status, 0)
+})
+
+test("add-model 不带来源 → 报错（破坏性：取消默认内联）", () => {
+  const root = freshRoot()
+  const result = cli(["add-model", "--provider", ANCHOR_ID, "--key", "x", "--context", "1", "--output", "1"], root)
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /必须指定模型来源/)
+})
+
+test("add-model --lab 建 canon（canon 不含 modelID），provider 只写 base + modelID", () => {
+  const root = freshRoot()
+  const lab = freshLab(root)
+  const result = cli(
+    ["add-model", "--provider", ANCHOR_ID, "--key", "k3",
+     "--lab", lab, "--lab-key", "km",
+     "--model-name", "Kimi K3", "--context", "1048576", "--output", "131072",
+     "--input", "text,image", "--model-id", "upstream/k3"],
+    root,
+  )
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(readJson(file(root, "models", lab, "km.json")), {
+    name: "Kimi K3",
+    limit: { context: 1048576, output: 131072 },
+    input: ["text", "image"],
+  })
+  assert.deepEqual(readJson(file(root, "providers", ANCHOR_ID, "models.json")).k3, {
+    base: `${lab}/km`,
+    modelID: "upstream/k3",
+  })
+  assert.equal(cli(["validate"], root).status, 0)
+})
+
+test("add-model --lab 撞已存在的 canon → 报错并提示 --base", () => {
+  const root = freshRoot()
+  const result = cli(
+    ["add-model", "--provider", ANCHOR_ID, "--key", "dup", "--lab", "anchor", "--lab-key", "base-model",
+     "--context", "1", "--output", "1"],
+    root,
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /已存在.*--base anchor\/base-model/)
+})
+
+test("add-model 给了不止一个来源 → 报错", () => {
+  const root = freshRoot()
+  const result = cli(
+    ["add-model", "--provider", ANCHOR_ID, "--key", "z", "--lab", "solo", "--inline", "--context", "1", "--output", "1"],
+    root,
+  )
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /只能给一个/)
+})
+
+test("add-model --base + limit → limit 写在 provider 层（覆盖），canon 不动", () => {
+  const root = freshRoot()
+  const before = readJson(file(root, "models", "anchor", "base-model.json"))
+  const result = cli(
+    ["add-model", "--provider", ANCHOR_ID, "--key", "capped", "--base", ANCHOR_BASE, "--context", "1", "--output", "1"],
+    root,
+  )
+  assert.equal(result.status, 0, result.stderr)
+  assert.deepEqual(readJson(file(root, "providers", ANCHOR_ID, "models.json")).capped, {
+    base: ANCHOR_BASE,
+    limit: { context: 1, output: 1 },
+  })
+  assert.deepEqual(readJson(file(root, "models", "anchor", "base-model.json")), before)
 })
 
 test("add-shared-model --lab/--key 写 models/<lab>/<key>.json；重复冲突", () => {
@@ -587,7 +662,7 @@ test("软提示：内联参数与某共享模型相同 → 提示可用 --base �
   const root = freshRoot()
   const result = cli(
     [
-      "add-model", "--provider", ANCHOR_ID, "--key", "anchor-copy",
+      "add-model", "--provider", ANCHOR_ID, "--key", "anchor-copy", "--inline",
       "--model-name", "Anchor Base", "--context", String(ANCHOR_BASE_LIMIT.context),
       "--output", String(ANCHOR_BASE_LIMIT.output),
     ],

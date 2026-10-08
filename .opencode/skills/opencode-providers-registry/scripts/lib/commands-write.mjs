@@ -25,6 +25,7 @@ import {
   parseUnsets,
   removeEmptyDir,
   reportReuseHint,
+  resolveModelSource,
   resolvePackage,
 } from "./spec.mjs"
 
@@ -85,6 +86,7 @@ export function commandAddProvider(flags) {
 
 const ADD_MODEL_FLAGS = new Set([
   "provider", "key", "model-name", "model-id", "context", "output", "variant", "base", "input",
+  "lab", "lab-key", "inline",
 ])
 
 export function commandAddModel(flags) {
@@ -103,22 +105,23 @@ export function commandAddModel(flags) {
   if (entry.models[key]) {
     throw new CliError(`供应商 "${providerId}" 下已存在模型 "${key}"。本 CLI 不做覆盖/改名，请换 key 或先人工处理`)
   }
-  const base = lastOf(flags, "base")
-  if (base !== undefined) requireShared(tree, base)
-  const spec = buildModelSpec(flags, { key, allowBase: true })
+  const { canon, providerSpec } = resolveModelSource(tree, flags, { key })
 
-  const nextModels = { ...entry.models, [key]: spec }
+  const nextModels = { ...entry.models, [key]: providerSpec }
   const providers = tree.providers.map((item) =>
     item.id === providerId ? { id: item.id, provider: item.provider, models: nextModels } : item,
   )
-  parseTree({ ...tree, providers })
+  const shared = canon ? new Map([...tree.shared, [canon.ref, canon.spec]]) : tree.shared
+  parseTree({ ...tree, providers, shared })
 
+  if (canon) writeJsonFile(sharedModelPath(root, canon.ref), canon.spec)
   writeJsonFile(join(providerDir(root, providerId), "models.json"), nextModels)
   syncManifest(root)
 
-  console.log(`✓ 已给供应商 "${providerId}" 添加模型 "${key}"`)
+  if (canon) console.log(`✓ 已建共享模型 "${canon.ref}"，并让供应商 "${providerId}" 的模型 "${key}" 引用它`)
+  else console.log(`✓ 已给供应商 "${providerId}" 添加模型 "${key}"`)
   console.log(`  写入 ${providerDir(root, providerId)}/models.json 与 ${join(root, "index.json")}`)
-  reportReuseHint(tree, spec)
+  reportReuseHint(tree, providerSpec)
 }
 
 export function commandAddSharedModel(flags) {

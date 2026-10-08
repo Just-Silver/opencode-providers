@@ -11,7 +11,7 @@ export const isPlainObject = (value) => value !== null && typeof value === "obje
 export const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 /** 只吃 `--flag`（不带值）的布尔开关；`--strict` 仅 `check` 用。 */
-const BOOLEAN_FLAGS = new Set(["json", "force", "help", "strict"])
+const BOOLEAN_FLAGS = new Set(["json", "force", "help", "strict", "inline"])
 
 export function parseArgs(argv) {
   const positional = []

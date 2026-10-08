@@ -56,7 +56,7 @@ export function parseInputList(input) {
 }
 
 /** 由命令行 flags 构造一个最小字段的模型 spec（供应商内联 or 顶层共享）。 */
-export function buildModelSpec(flags, { key, allowBase }) {
+export function buildModelSpec(flags, { key, allowBase, allowModelID = true }) {
   const spec = {}
   const base = lastOf(flags, "base")
   if (base !== undefined) {
@@ -67,8 +67,10 @@ export function buildModelSpec(flags, { key, allowBase }) {
   const name = lastOf(flags, "model-name")
   if (typeof name === "string" && name.trim() !== "") spec.name = name
 
-  const modelId = lastOf(flags, "model-id")
-  if (typeof modelId === "string" && modelId.trim() !== "" && modelId !== key) spec.modelID = modelId
+  if (allowModelID) {
+    const modelId = lastOf(flags, "model-id")
+    if (typeof modelId === "string" && modelId.trim() !== "" && modelId !== key) spec.modelID = modelId
+  }
 
   const context = lastOf(flags, "context")
   const output = lastOf(flags, "output")
@@ -92,6 +94,38 @@ export function buildModelSpec(flags, { key, allowBase }) {
   if (typeof input === "string" && input.trim() !== "") spec.input = parseInputList(input)
 
   return spec
+}
+
+/**
+ * 解析「模型来源」三选一：--lab（建 canon）/ --base（复用）/ --inline（本家独有）。
+ * 恰好给一个；返回 { canon?, providerSpec }（canon 仅在 --lab 时存在）。
+ * 必须在既有的身份/重复校验之后调用。
+ */
+export function resolveModelSource(tree, flags, { key }) {
+  const lab = lastOf(flags, "lab")
+  const hasLab = typeof lab === "string" && lab.trim() !== ""
+  const hasBase = lastOf(flags, "base") !== undefined
+  const hasInline = flags.inline === true || flags.inline === "true"
+  const count = [hasLab, hasBase, hasInline].filter(Boolean).length
+  if (count === 0) {
+    throw new CliError(`必须指定模型来源：--lab <lab>（建共享模型）/ --base <lab>/<model>（复用）/ --inline（本家独有）`)
+  }
+  if (count > 1) throw new CliError(`--lab / --base / --inline 只能给一个`)
+
+  if (hasLab) {
+    const ref = `${checkId(lab, "lab")}/${checkId(lastOf(flags, "lab-key") ?? key, "共享模型 key")}`
+    if (tree.shared.has(ref)) throw new CliError(`共享模型 "${ref}" 已存在，请改用 --base ${ref} 复用`)
+    const canon = buildModelSpec(flags, { key: ref.split("/")[1], allowBase: false, allowModelID: false })
+    const providerSpec = { base: ref }
+    const modelId = lastOf(flags, "model-id")
+    if (typeof modelId === "string" && modelId.trim() !== "" && modelId !== key) providerSpec.modelID = modelId
+    return { canon: { ref, spec: canon }, providerSpec }
+  }
+  if (hasBase) {
+    requireShared(tree, lastOf(flags, "base"))
+    return { providerSpec: buildModelSpec(flags, { key, allowBase: true }) }
+  }
+  return { providerSpec: buildModelSpec(flags, { key, allowBase: false }) }
 }
 
 // ── 字段补丁（set-*） ──────────────────────────────────────────────────────
