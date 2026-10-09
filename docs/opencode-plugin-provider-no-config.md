@@ -1,6 +1,6 @@
 # 零 opencode.json：用插件把供应商+模型全在运行期注册
 
-> **职责**（本项目设计）：本插件「零 `opencode.json`」的设计、运行期证据与踩坑。不写 opencode 通用教程。
+<!-- 职责（本项目设计）：本插件「零 `opencode.json`」的设计、运行期证据与踩坑。不写 opencode 通用教程。 -->
 
 目标：**完全不写 `opencode.json`**，插件安装好即用，`/connect` 里能连、`/models` 里能选。
 

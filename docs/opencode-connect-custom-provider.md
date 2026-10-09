@@ -1,6 +1,6 @@
 # `/connect` 自定义供应商（models.dev 里没有的怎么补）
 
-> **职责**（通用知识）：opencode 的 `/connect` 与自定义供应商三条路线。不写本插件的安装 / 使用。
+<!-- 职责（通用知识）：opencode 的 `/connect` 与自定义供应商三条路线。不写本插件的安装 / 使用。 -->
 
 > 本文以 **OpenCode V2** 为准（文档：<https://opencode.ai/v2/docs/>）。
 > 源码：`E:\Code\Projects\Agent\Externals\opencode`，checkout = v2.0.23（commit `e2d540042a`）。

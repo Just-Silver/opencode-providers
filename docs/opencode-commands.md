@@ -1,6 +1,6 @@
 # opencode 内置命令 vs 插件命令（含 `/connect` 判定）
 
-> **职责**（通用知识）：opencode 的命令系统与插件命令机制。不写本插件的用法。
+<!-- 职责（通用知识）：opencode 的命令系统与插件命令机制。不写本插件的用法。 -->
 
 来源：`E:\Code\Projects\Agent\Externals\opencode` 源码，checkout = v2.0.23，commit `e2d540042a`。
 （本地实际运行的 opencode 版本可能不同，但命令表结构与判定方法一致。）

@@ -5,7 +5,7 @@
 
 现状：`0.3.4` 是**正式版**（npm `latest`，OIDC 发布 + provenance）；预发布在 `next`。
 
-> **职责**（AI agent）：硬约束 / 坑 / 命令 + 文档地图。完整流程步骤见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
+<!-- 职责（AI agent）：硬约束 / 坑 / 命令 + 文档地图。完整流程步骤见 CONTRIBUTING.md。 -->
 
 # 语言规则
 

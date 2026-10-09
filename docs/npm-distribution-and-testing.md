@@ -1,6 +1,6 @@
 # npm 分发与测试（参考 `opencode-goal` 后的结论）
 
-> **职责**（本项目工程）：npm 包形态 / 预发布发布策略 / 测试与冒烟实践。不写注册表数据，也不写插件运行原理。
+<!-- 职责（本项目工程）：npm 包形态 / 预发布发布策略 / 测试与冒烟实践。不写注册表数据，也不写插件运行原理。 -->
 
 > 参考对象：`E:\Code\Projects\Agent\opencode-goal`（v0.9.0，`@justsilver/opencode-goal-plugin`）。
 > 它的 `docs/opencode/{releasing,config-install,plugin-dev-gotchas,smoke-checklist}.md` 与本仓的这份文档是同一路线，
