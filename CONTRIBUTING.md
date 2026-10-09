@@ -212,7 +212,7 @@ registry/
 | 模型 `modelID` | 发给上游的真实模型/部署 ID，默认等于上面的 key |
 | 模型 `limit` | `context` / `output` 必填（无 `base` 时），`input` 可选 |
 | 模型 `cost` | 每百万 token 美元；`cache_read`/`cache_write` 可选 |
-| 模型 `tools` / `input` / `output` | 能力：是否支持工具调用、输入/输出模态；**缺省** `tools=true` / `input=["text","image"]` / `output=["text"]`（与 opencode 内核 `Model.Info.default()` 一致）。**纯文本模型必须显式写 `input: ["text"]`**，否则按缺省会被当作支持图片 |
+| 模型 `tools` / `input` / `output` | 能力：是否支持工具调用、输入/输出模态；**缺省** `tools=true` / `input=["text","image"]` / `output=["text"]`（与 opencode 内核 `Model.Info.default()` 一致）。**宁可多写、不可少写**：多声明的能力由上游自行拒绝（无害），少声明则该能力在客户端就完全用不了；要精确声明纯文本再显式写 `input: ["text"]` |
 | 模型 `reasoningField` / `maxTokensField` | 映射到 `Model.Compatibility` |
 | 模型 `variants` | `[{ "id": "high", "settings": {} }]` |
 | 模型 `status` / `disabled` | 生命周期标记；`disabled: true` 不出现在 `/models` |

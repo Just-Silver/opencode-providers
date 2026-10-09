@@ -401,7 +401,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs remove-sh
 - `limit` 要写就写全：`--context` 与 `--output` 必须同时给（`set-*` 同理——想只改 `output` 也要把 `--context` 带上原值）；**都没给又没用 `--base` 会直接报错**（参数不猜）。
 - **能力项必须问过用户再写**：用户选了「图片/音频/…」就用 `--input text,image`（逗号分隔、必须含 `text`）。
   多选问题的 label 是展示名（如「纯文本 (text)」），传给 `--input` 的是**括号里的英文单词**（`text,image`）。
-  用户只选「纯文本」时**必须显式写 `--input text`**——省略 `--input` 会走插件兜底 `["text","image"]`（与 opencode 内核一致），等于默认给图片能力；要开图片/音频/视频同样显式写。
+  按用户勾选如实写（如 `--input text,image`）。**宁可多写、不可少写**——多声明的能力由上游拒绝（无害），少声明则客户端根本用不了该能力；省略 `--input` 走插件兜底 `["text","image"]`（与 opencode 内核一致）。
 - `--model-id` 省略（或等于 key）就不写 `modelID`；`--model-name` 省略就不写 `name`（**不会**拿供应商名顶替）。
 - 模型与某个已存在的**顶层共享模型**参数一致时，用 `add-*/--base <lab>/<model>` 引用（铁律 1 / 路线 C），别复制一份；`--inline` 写入且参数与某 canon 相同时，CLI 会打一行「可改用 `--base` 复用」的软提示。
 - `add-provider` 的 `--baseurl` 若已被别家占用会报错，确属有意才加 `--force`。
