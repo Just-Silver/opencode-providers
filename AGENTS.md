@@ -3,7 +3,7 @@
 `opencode-providers`：给 opencode 补上 **models.dev 目录里没有的供应商**。
 一份自维护注册表（**按供应商分文件**：`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`，GitHub raw 托管；插件运行期拉取并聚合成一份）+ 一个 opencode 插件，实现**零 `opencode.json`** 接入。
 
-现状：`0.3.2` 是**正式版**（npm `latest`，OIDC 发布 + provenance）；预发布在 `next`。
+现状：`0.3.4` 是**正式版**（npm `latest`，OIDC 发布 + provenance）；预发布在 `next`。
 
 > **职责**（AI agent）：硬约束 / 坑 / 命令 + 文档地图。完整流程步骤见 [CONTRIBUTING.md](./CONTRIBUTING.md)。
 
