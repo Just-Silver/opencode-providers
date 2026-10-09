@@ -4,5 +4,8 @@
   },
   "kimi-k3": {
     "base": "kimi/kimi-k3"
+  },
+  "glm-5.3-flash": {
+    "base": "glm/glm-5.3-flash"
   }
 }

@@ -1,0 +1,31 @@
+{
+  "name": "GLM 5.3 Flash",
+  "limit": {
+    "context": 1048576,
+    "output": 131072
+  },
+  "variants": [
+    {
+      "id": "low",
+      "settings": {
+        "reasoningEffort": "low"
+      }
+    },
+    {
+      "id": "high",
+      "settings": {
+        "reasoningEffort": "high"
+      }
+    },
+    {
+      "id": "max",
+      "settings": {
+        "reasoningEffort": "max"
+      }
+    }
+  ],
+  "input": [
+    "text",
+    "image"
+  ]
+}
