@@ -35,6 +35,16 @@ const PLUGIN_ID = "opencode-providers"
 /** Tags integrations so the TUI entry can recognise its own (TUI side keeps its own copy of this string). */
 const INTEGRATION_SOURCE = PLUGIN_ID
 
+/**
+ * Background revalidation cadence. `loadRegistry` (no `force`) still gates the
+ * network on the 6h TTL; this only decides how often we *check*, so a stale
+ * cache is refreshed within one interval of expiring instead of only on the next
+ * plugin load (opencode start / plugin install / config reload / service restart).
+ * Overridable via `options.refreshIntervalMs` (tests / forks); a non-positive
+ * value disables the timer.
+ */
+const DEFAULT_REFRESH_INTERVAL_MS = 30 * 60 * 1000
+
 interface IntegrationRefLike {
   id: string
   name: string
@@ -92,6 +102,14 @@ export default {
     // Closure-local: repeated `setup` calls (config hot reload) must not share state.
     const state: { registry?: Registry } = {}
 
+    // Swap the closure state and re-run the transforms. Registration is a full
+    // replace, so entries removed upstream also disappear on the next apply.
+    const applyRegistry = async (registry: Registry): Promise<void> => {
+      state.registry = registry
+      await ctx.integration.reload()
+      await ctx.provider.reload()
+    }
+
     // Force refresh: bypass the TTL, re-register, and tell the TUI what it got.
     // A `stale-cache` result means upstream was unreachable, so it counts as a
     // failure and leaves `state` (and the registered providers) untouched.
@@ -101,9 +119,7 @@ export default {
       if (result.source === "stale-cache") {
         return { ok: false, errors: ["registry refresh failed; serving the cached copy"] }
       }
-      state.registry = result.registry
-      await ctx.integration.reload()
-      await ctx.provider.reload()
+      await applyRegistry(result.registry)
       return {
         ok: true,
         providers: Object.keys(result.registry.providers).length,
@@ -180,6 +196,43 @@ export default {
         })
       }
     })
+
+    // Background revalidation. A non-force load runs the same TTL check the boot
+    // path used; only a real content change (`source === "network"`) re-registers,
+    // so an unchanged registry never nudges `provider.reload()` and `/models` does
+    // not flap. A failed check keeps the current registration and retries next tick,
+    // so a registry that was unavailable at boot recovers without a restart.
+    const intervalMs =
+      typeof ctx.options.refreshIntervalMs === "number" ? ctx.options.refreshIntervalMs : DEFAULT_REFRESH_INTERVAL_MS
+    let timer: ReturnType<typeof setInterval> | undefined
+    if (intervalMs > 0) {
+      let ticking = false
+      const tick = async (): Promise<void> => {
+        if (ticking) return
+        ticking = true
+        try {
+          const result = await loadRegistry({ url, fetch: globalThis.fetch, store })
+          if (!result.ok || result.source !== "network") return
+          await applyRegistry(result.registry)
+        } catch (error) {
+          console.warn(
+            `[${PLUGIN_ID}] background registry refresh failed: ${error instanceof Error ? error.message : String(error)}`,
+          )
+        } finally {
+          ticking = false
+        }
+      }
+      timer = setInterval(() => void tick(), intervalMs)
+      // Never keep the process alive for this: the service owns an HTTP listener,
+      // and an uncleared timer would otherwise hang `node --test`.
+      unrefTimer(timer)
+    }
+
+    // Teardown: the host runs this on unload / hot reload / location close, so a
+    // reloaded plugin never leaves an orphaned interval behind.
+    return () => {
+      if (timer !== undefined) clearInterval(timer)
+    }
   },
 }
 
@@ -187,6 +240,13 @@ function countModels(registry: Registry): number {
   let total = 0
   for (const provider of Object.values(registry.providers)) total += Object.keys(provider.models).length
   return total
+}
+
+/** Detach a timer from the event loop where the runtime supports it (Node/Bun). */
+function unrefTimer(timer: unknown): void {
+  if (typeof timer !== "object" || timer === null) return
+  const unref = (timer as { unref?: unknown }).unref
+  if (typeof unref === "function") (unref as () => void).call(timer)
 }
 
 function asCacheEntry(value: unknown): RegistryCacheEntry | undefined {

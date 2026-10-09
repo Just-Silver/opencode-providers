@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- 插件：**注册表后台自动刷新**——服务端入口 `setup()` 之后每 **30 分钟**做一次**非 force** 的 TTL 检查（TTL 仍 6h，6h 内只读缓存零网络）；**只有内容真变了（`source === "network"`）才** `integration.reload()` + `provider.reload()`，未变不碰 `/models`；上游不可达时保留现有注册、下个 tick 重试（**启动时拉不到也能自行恢复，无需重启**）。定时器 `unref()`，且 `setup()` **返回 cleanup**（热重载 / location 关闭时 `clearInterval`，**不泄漏**）；间隔可用 `options.refreshIntervalMs` 覆盖（≤0 禁用）。
+
 ### Changed
 
 - 技能 CLI：`search` 由「任一 token 命中」（OR）改为**全 token AND**——归一化后查询的**全部**显著 token 都命中才算，**无兜底**（AND 零命中直接「没有匹配」，不回退宽松）。专治系列词跨家族误召：搜 `glm-5.3-flash` 不再因共有 token `flash` 把 `deepseek-v4.1-flash` 一并召回；单个系列词查询（如 `flash`）仍召回全部家族；大小写不敏感。

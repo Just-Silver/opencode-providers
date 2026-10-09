@@ -53,8 +53,11 @@
 - 注册表用 `schemaVersion` 解耦：改注册表**不需要**发插件版本；不匹配的版本整份拒绝
 - 拉取：默认 6h TTL + `ETag` + 失败沿用旧缓存。缓存落在 `ctx.storage`（= 全局 `opencode.db` 的 `kv` 表，宿主给键加
   `plugin:<id 的 hex>:` 前缀，跨 location 共享）；**键含 URL**（`registry-cache:<url>`），换地址即刻重拉；
-  **没有后台定时器** —— 只在插件 `setup()`（= opencode 启动 / 安装换版本 / 配置变更热重载 / 重启）时判定一次 TTL
-  （内核 models.dev 才是"每 5 分钟轮询"，别把两者混了）
+  **有后台定时器（每 30 分钟 tick 一次）** —— `setup()`（= opencode 启动 / 安装换版本 / 配置变更热重载 / 重启）时判一次 TTL，
+  之后每 30 分钟再判一次（**非 force**：TTL 仍决定是否联网，6h 内 tick 只读缓存零网络）；**只有内容真变了（`source === "network"`）才 `reload()`**，
+  未变不碰 `/models`；上游不可达时保留现有注册、下个 tick 重试（启动时拉不到也能自恢复，无需重启）。
+  定时器 `unref()`，且 `setup()` **返回 cleanup**（热重载 / location 关闭时 `clearInterval`，**不泄漏**）；间隔可用 `options.refreshIntervalMs` 覆盖（≤0 禁用）。
+  （内核 models.dev 是"每 5 分钟轮询"，两者节奏不同，别把两者混了）
 - 参数写全，不许猜：`limit`/`cost`/`tools`/模态/`compatibility`/`variants` 都由注册表给出
 - **注入链路**：`kv` 缓存 → `setup()` 解析 → `editor.add({ info, models })` 写进内核 `Provider.Service` 内存 records
   → `Provider.snapshot()` 按 activation/凭据过滤 → `Model.available()` → `/api/model`。**内核从不读我们那条 kv 行**，

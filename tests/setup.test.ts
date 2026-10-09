@@ -120,6 +120,29 @@ function fakeContext(options: Record<string, unknown> = {}): FakeContext {
   const reloads = { integration: 0, provider: 0 }
   const registered: FakeContext["registered"] = {}
 
+  let integrationTransform: ((editor: any) => void) | undefined
+  let providerTransform: ((editor: any) => void) | undefined
+  // Mirrors the real host: reload re-applies the last transform, and `add`
+  // replaces by id (the kernel's `editor.add` is a full replace).
+  const integrationEditor = {
+    update: (id: string, mutate: (integration: any) => void) => {
+      const integration = { id, name: id }
+      mutate(integration)
+      integrations.set(id, integration)
+    },
+    method: {
+      update: (input: { integrationID: string; method: { type: string; label?: string } }) =>
+        void methods.push(input),
+    },
+  }
+  const providerEditor = {
+    add: (input: any) => {
+      const index = providers.findIndex((entry) => entry.info.id === input.info.id)
+      if (index === -1) providers.push(input)
+      else providers[index] = input
+    },
+  }
+
   const ctx = {
     options,
     storage: {
@@ -128,25 +151,23 @@ function fakeContext(options: Record<string, unknown> = {}): FakeContext {
     },
     integration: {
       transform: async (callback: (editor: any) => void) => {
-        callback({
-          update: (id: string, mutate: (integration: any) => void) => {
-            const integration = { id, name: id }
-            mutate(integration)
-            integrations.set(id, integration)
-          },
-          method: {
-            update: (input: { integrationID: string; method: { type: string; label?: string } }) =>
-              void methods.push(input),
-          },
-        })
+        integrationTransform = callback
+        callback(integrationEditor)
       },
-      reload: async () => void (reloads.integration += 1),
+      reload: async () => {
+        reloads.integration += 1
+        integrationTransform?.(integrationEditor)
+      },
     },
     provider: {
       transform: async (callback: (editor: any) => void) => {
-        callback({ add: (input: any) => void providers.push(input) })
+        providerTransform = callback
+        callback(providerEditor)
       },
-      reload: async () => void (reloads.provider += 1),
+      reload: async () => {
+        reloads.provider += 1
+        providerTransform?.(providerEditor)
+      },
     },
     rpc: {
       register: async (_definition: unknown, handlers: Record<string, (input: unknown, context: unknown) => Promise<unknown>>) => {
@@ -320,4 +341,88 @@ test("rpc refresh：上游不可达（有缓存 → stale）→ ok:false、不�
   assert.equal(state.reloads.integration, 0)
   assert.equal(state.reloads.provider, 0)
   assert.equal(state.providers.length, PROVIDER_IDS.length, "旧注册结果不应被清空")
+})
+
+// ── 后台定时刷新（服务端 tick）──────────────────────────────────────────────
+// setup() 之后起一个定时器，每 refreshIntervalMs 做一次非 force 的 TTL 检查；
+// 只有「TTL 过期 + revision 变化」才 reload。测试注入很小的间隔来驱动 tick。
+
+/** 把注册表缓存行的 fetchedAt 拨回 0，模拟 TTL 过期（下个 tick 会走网络）。 */
+function ageRegistryCache(state: FakeContext): void {
+  const key = [...state.storage.keys()].find((candidate) => candidate.startsWith("registry-cache:"))
+  assert.ok(key, "应先有注册表缓存行")
+  const entry = state.storage.get(key!) as { fetchedAt: number }
+  state.storage.set(key!, { ...entry, fetchedAt: 0 })
+}
+
+async function waitFor(check: () => boolean, timeoutMs = 3_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!check()) {
+    if (Date.now() >= deadline) throw new Error("等待后台 tick 超时")
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+}
+
+/** 就地推进 revision 并改掉某家 provider 的 name；模拟一次真实更新（须在 setup 之后调用）。 */
+function bumpRevisionAndName(tree: Record<string, string>, id: string): void {
+  const manifest = JSON.parse(tree["index.json"]!) as { revision: string }
+  manifest.revision = "tick-changed-revision"
+  tree["index.json"] = JSON.stringify(manifest)
+  const provider = JSON.parse(tree[`providers/${id}/provider.json`]!) as { name: string }
+  provider.name = `${provider.name} (tick updated)`
+  tree[`providers/${id}/provider.json`] = JSON.stringify(provider)
+}
+
+test("后台 tick：TTL 过期且 revision 变化 → 重新注册（reload + 用新数据）", async () => {
+  const state = fakeContext({ refreshIntervalMs: 20 })
+  const id = PROVIDER_IDS[0]!
+  const tree = { ...REGISTRY_TREE }
+  const shippedName = (JSON.parse(tree[`providers/${id}/provider.json`]!) as { name: string }).name
+  const updatedName = `${shippedName} (tick updated)`
+  let cleanup: (() => void) | void
+  await withFetch(treeFetch(tree).fetch, async () => {
+    cleanup = await plugin.setup(state.ctx)
+    bumpRevisionAndName(tree, id)
+    ageRegistryCache(state)
+    await waitFor(() => state.reloads.provider > 0)
+  })
+  if (typeof cleanup === "function") cleanup()
+  assert.equal(state.reloads.provider, 1)
+  assert.equal(state.reloads.integration, 1)
+  const latest = [...state.providers].reverse().find((entry) => entry.info.id === id)
+  assert.equal(latest?.info.name, updatedName)
+})
+
+test("后台 tick：TTL 过期但 revision 未变 → 不 reload（避免 /models 抖动）", async () => {
+  const state = fakeContext({ refreshIntervalMs: 20 })
+  const { fetch, calls } = treeFetch({ ...REGISTRY_TREE })
+  let cleanup: (() => void) | void
+  await withFetch(fetch, async () => {
+    cleanup = await plugin.setup(state.ctx)
+    const afterSetup = calls.length
+    ageRegistryCache(state)
+    // tick 至少走一次网络（重新请求 manifest）才可能 reload
+    await waitFor(() => calls.length > afterSetup)
+  })
+  if (typeof cleanup === "function") cleanup()
+  assert.equal(state.reloads.provider, 0, "revision 未变不应 reload")
+  assert.equal(state.reloads.integration, 0)
+})
+
+test("后台 tick：setup 返回 cleanup，调用后定时器被清掉（不泄露）", async () => {
+  const state = fakeContext({ refreshIntervalMs: 20 })
+  const tree = { ...REGISTRY_TREE }
+  const { fetch, calls } = treeFetch(tree)
+  let cleanup: (() => void) | void
+  await withFetch(fetch, async () => {
+    cleanup = await plugin.setup(state.ctx)
+    assert.equal(typeof cleanup, "function", "setup 应返回 cleanup 函数")
+    if (typeof cleanup === "function") cleanup()
+    bumpRevisionAndName(tree, PROVIDER_IDS[0]!)
+    ageRegistryCache(state)
+    const callsAfterCleanup = calls.length
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    assert.equal(calls.length, callsAfterCleanup, "cleanup 后不应再有 tick 请求")
+    assert.equal(state.reloads.provider, 0)
+  })
 })

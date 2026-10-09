@@ -96,7 +96,7 @@ Effect 版写法见 <https://opencode.ai/v2/docs/build/plugins/effect/>（`Plugi
 
 - **配置为 0**：provider/integration/models 全部由插件在 server 启动时注册；`opencode.json` 无需任何字段。
 - **凭据持久**：`/connect` 填的 key 存服务端 SQLite（`opencode debug paths db`），重启后仍在。
-- **每 5 分钟可自刷新**：插件里 `setInterval` 重新拉模型 → `ctx.provider.reload()`（transform 需可重放）。
+- **可后台自刷新**：服务端入口每 30 分钟做一次非 force 的 TTL 检查（见下文「本插件的注册表缓存」），内容变了才 `ctx.provider.reload()`（transform 可重放）。
 - **不膨胀**：模型清单只在内存 registry，不写配置文件。
 - **卸载干净**：删插件目录即回到出厂状态（凭据仍在 DB，可用 `/connect` 管理）。
 
@@ -242,8 +242,8 @@ OpenCode 内部已有两种现成做法，可直接照抄：
 
 | | opencode 内核（models.dev / 本地发现） | 本插件（注册表） |
 |---|---|---|
-| 触发 | **常驻定时轮询**（`Schedule.spaced(ttl)`），没人用也会醒 | **只在插件激活时判一次**，没有定时器 |
-| "TTL" 语义 | 轮询周期 **且** 缓存陈旧阈值（`updatedAt`/`checked`） | 只是**激活时刻**的陈旧阈值 |
+| 触发 | **常驻定时轮询**（`Schedule.spaced(ttl)`），没人用也会醒 | **插件激活时判一次 + 每 30 分钟 tick 一次**（非 force，TTL 决定是否联网） |
+| "TTL" 语义 | 轮询周期 **且** 缓存陈旧阈值（`updatedAt`/`checked`） | **检查时刻**的陈旧阈值（检查每 30 分钟，TTL 仍 6h） |
 | 启动是否阻塞网络 | 不：文件 → KV ⇒ **打包快照** → 网络；有快照就永不请求 | 会：无缓存且拉不到 ⇒ setup `return`（0 条注册） |
 | 内容判重 | 响应体 **sha256 digest**（相同则连缓存都不写） | HTTP **`ETag`**（304 时用旧 body 并把 `fetchedAt` 顺延） |
 | 缓存位置 | 全局 KV（`kv` 表） | 同一个全局 KV（`plugin:<id>:registry-cache:<url>`） |
@@ -268,9 +268,12 @@ OpenCode 内部已有两种现成做法，可直接照抄：
 
 **TTL = 6 小时**（`registry/source.ts` 的 `DEFAULT_TTL_MS = 6 * 60 * 60 * 1000`；HTTP 超时 10s）。
 
-> **关键：没有后台定时器。** `loadRegistry()` 只在插件 `setup()` 时执行一次 —— 所谓"重拉"发生在**插件被(重新)加载**
-> 的时刻：opencode 启动、插件安装/换版本、配置变化（文件监视热重载）、显式重启服务。
-> 6h 是「加载那一刻判断缓存是否太旧」的阈值，不是轮询周期；没重启就一直用手里那份（进程内已注册的也不变）。
+> **关键：有后台定时器（每 30 分钟 tick 一次）。** `setup()` 时判定一次 TTL，之后每 30 分钟再做一次**非 force** 检查；
+> TTL 仍决定是否真正联网（6h 内 tick 只读缓存、零网络），**只有内容真变了（`source === "network"`）才**
+> `integration.reload()` + `provider.reload()`（未变不碰 `/models`）；上游不可达时保留现有注册、下个 tick 重试。
+> 定时器 `unref()`，且 `setup()` 返回的 cleanup 会在**热重载 / location 关闭**时 `clearInterval`（**不泄漏**）；
+> 间隔可用 `options.refreshIntervalMs` 覆盖（≤0 禁用）。**到期后最多 30 分钟就会自动刷新**，不再依赖重启或手动 `ctrl+r`。
+> 除此之外，"重拉"仍会发生在**插件被(重新)加载**的时刻：opencode 启动、插件安装/换版本、配置变化（文件监视热重载）、显式重启服务。
 >
 > **每次启动 ≠ 每次重拉**：缓存行在全局 `kv` 表里**跨进程/跨启动持久**，所以 6h 内无论启动多少次都**零网络**。
 > 实测（`loadRegistry` + 真实缓存行 + 计数 fetch）：默认 TTL 下 `source = "cache"`、**fetch 调用 0 次**；
@@ -281,6 +284,9 @@ OpenCode 内部已有两种现成做法，可直接照抄：
 **完全不读注册表**（只注册 `/connect-providers`，命令里通过 `ctx.data.location.integration.list()` 读服务端**已注册**的
 integration，见 `view/connect.ts:113-117`），CLI/其它客户端同理 —— 所以**开多少次 TUI 都不会多拉一次**。
 缓存行在全局 `kv` 表（跨 location、跨进程），多个触发并发时最多"几乎同时发两条"，同样无害。
+
+后台定时器也一样：只在 **server 入口**（`index.ts`）里，`setup()` 按 **location 各跑一次**，所以每个 location 一个 timer、
+各自只 `reload()` 自己的 location；开多少 TUI 都不影响它（`setup()` 返回的 cleanup 会在热重载 / location 关闭时清掉它）。
 
 另一次实测（2026-10-07，本机）：service 进程 `StartTime = 05:53` 本地，而缓存行 `fetchedAt = 07:40` 本地
 （**晚了 1h47m**，因为期间发生过插件重载）→ 证明**"启动"不是唯一触发点**，重载也会走一次 `setup()`；
@@ -311,6 +317,7 @@ integration，见 `view/connect.ts:113-117`），CLI/其它客户端同理 —�
 **想立刻重拉**（不等 6h、不重启）任选其一：在 `/connect-providers` 弹窗里按 `ctrl+r`（**Force refresh**，经 server RPC
 绕过 TTL 并 `provider`/`integration.reload()`；上游不可达时保留原列表并报错）；`opencode service restart`；
 把 `registryUrl` 换成新地址（键不同）；或直接删掉对应 kv 行。
+（一般用不着——TTL 到点后**最多 30 分钟**后台会自动刷新；想让节奏更快/更慢或关掉，用 `options.refreshIntervalMs`。）
 
 **观测**：`console.*` 不进日志（上文），直接读 DB 最准（Node ≥ 22.5 自带 `node:sqlite`，只读打开）：
 
