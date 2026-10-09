@@ -179,7 +179,7 @@ test("search 标注命中来源：供应商 id/名称命中带标记，纯模型
   assert.doesNotMatch(byModel.stdout, /供应商 id\/名称命中/)
 })
 
-test("search 宽松（归一化 + token）匹配：大小写 / 分隔符 / 词序 / 厂商前缀都能命中", () => {
+test("search AND（全 token 命中）匹配：大小写 / 分隔符 / 词序 / modelID 全串都能命中", () => {
   const root = freshRoot()
   const hits = (q: string) => {
     const result = cli(["search", q], root)
@@ -191,10 +191,10 @@ test("search 宽松（归一化 + token）匹配：大小写 / 分隔符 / 词�
   assert.match(hits("ANCHOR/BASE_MODEL"), new RegExp(escapeRe(ANCHOR_BASE)))
   // 点号分隔也应命中同一 canon
   assert.match(hits("Anchor.Base.Model"), new RegExp(escapeRe(ANCHOR_BASE)))
-  // 词序颠倒（token 匹配，不是子串匹配）
-  assert.match(hits("shared anchor"), new RegExp(escapeRe(ANCHOR_BASE_ONLY)))
-  // 带厂商前缀的上游 modelID 形态（`vendor/model`）也应命中该模型 key
-  assert.match(hits("somevendor/anchor-shared"), new RegExp(escapeRe(ANCHOR_BASE_ONLY)))
+  // 词序颠倒（token 集合匹配，不是子串匹配）
+  assert.match(hits("model anchor"), new RegExp(escapeRe(ANCHOR_BASE)))
+  // 上游 modelID 全串（带厂商前缀）命中
+  assert.match(hits("UPSTREAM/ANCHOR"), new RegExp(escapeRe(ANCHOR_OVERRIDE)))
   // 宽松召回：命中可能不止一个（多个候选交给用户二次确认）
   const broad = cli(["search", "anchor"], root)
   assert.equal(broad.status, 0, broad.stderr)
@@ -202,6 +202,52 @@ test("search 宽松（归一化 + token）匹配：大小写 / 分隔符 / 词�
     broad.stdout.includes(token),
   )
   assert.ok(matched.length >= 2, `「anchor」应召回多个候选，实际：${matched.join(", ")}`)
+})
+
+test("search 纯 AND 无兜底：系列词（flash）不跨家族误召；AND 零命中直接「没有匹配」", () => {
+  const root = freshRoot()
+  // 两个不同家族、共用系列词的模型（昔日 glm 查询因共有 token flash 误召 deepseek）；
+  // 家族词用随仓不存在的 zeta/omega，避免与随仓 lab 相撞
+  for (const [lab, key] of [
+    ["zeta", "zeta-flash"],
+    ["omega", "omega-flash"],
+  ] as const) {
+    const added = cli(
+      [
+        "add-model",
+        "--provider", ANCHOR_ID,
+        "--key", key,
+        "--lab", lab,
+        "--model-name", key,
+        "--context", "1048576",
+        "--output", "131072",
+      ],
+      root,
+    )
+    assert.equal(added.status, 0, added.stderr)
+  }
+
+  const zetaRe = /zeta-flash/
+  const omegaRe = /omega-flash/
+
+  // AND：查询的家族词必须命中——共有 token flash 不再把 omega 捞回来；大小写不敏感
+  for (const q of ["zeta-flash", "ZETA-Flash"]) {
+    const hit = cli(["search", q], root)
+    assert.equal(hit.status, 0, `${q} → ${hit.stderr}`)
+    assert.match(hit.stdout, zetaRe)
+    assert.doesNotMatch(hit.stdout, omegaRe)
+  }
+
+  // 查询只剩一个系列词 token（AND ≡ OR）：明确找 flash 时全部家族都召回
+  const series = cli(["search", "flash"], root)
+  assert.equal(series.status, 0, series.stderr)
+  assert.match(series.stdout, zetaRe)
+  assert.match(series.stdout, omegaRe)
+
+  // 无兜底：AND 零命中直接没有匹配（回退 OR 会靠 flash 又把 omega 捞回来）
+  const noFallback = cli(["search", "somevendor/zeta-flash"], root)
+  assert.equal(noFallback.status, 1)
+  assert.match(noFallback.stdout, /没有匹配/)
 })
 
 test("show 单看一个供应商/模型；不存在报错", () => {

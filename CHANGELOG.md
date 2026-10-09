@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 技能 CLI：`search` 由「任一 token 命中」（OR）改为**全 token AND**——归一化后查询的**全部**显著 token 都命中才算，**无兜底**（AND 零命中直接「没有匹配」，不回退宽松）。专治系列词跨家族误召：搜 `glm-5.3-flash` 不再因共有 token `flash` 把 `deepseek-v4.1-flash` 一并召回；单个系列词查询（如 `flash`）仍召回全部家族；大小写不敏感。
+
 ## [0.3.3] - 2026-10-08
 
 ### Changed

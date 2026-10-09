@@ -22,6 +22,9 @@ export function commandSearch(positional, flags) {
   const query = (positional[0] ?? lastOf(flags, "query") ?? "").toLowerCase()
   if (!query) throw new CliError("用法：search <关键词>")
   const registry = parseTree(loadTree(resolveRoot(flags)))
+  // AND 匹配：查询的**全部**显著 token 都命中才算（见 matchesQuery）。
+  // 系列词（flash/air/mini…）跨家族共用，「任一 token」的 OR 会把别家同系列模型全捞回来；
+  // AND 零命中就提示「没有匹配」，**不回退 OR**——回退会让系列词误召复发。
   const shared = summarizeShared(registry).filter((row) => matchesShared(row, query))
   const rows = []
   for (const row of summarize(registry)) {

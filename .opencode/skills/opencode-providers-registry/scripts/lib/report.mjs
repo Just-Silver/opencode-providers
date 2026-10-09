@@ -106,8 +106,14 @@ function significantTokens(normalized) {
 }
 
 /**
- * 宽松匹配（**召回优先**，故意不严格）：归一化后整体互为子串，或查询的任一「显著 token」命中候选字段。
- * 因为宽松，命中**可能多个**——由技能用 `multiple` 的 `question` 让用户二次确认真实家族。
+ * 匹配：归一化后整体互为子串（精确路径），或查询的**全部**「显著 token」都命中候选字段（AND）。
+ *
+ * 全 token AND 是硬要求：系列词（flash / air / mini / pro …）跨家族共用，若按「任一 token」（OR）
+ * 命中，查询 `glm-5.3-flash` 会因共有 token `flash` 把 `deepseek-v4.1-flash` 一并召回；
+ * AND 要求查询里的家族词（glm）也命中，跨家族同系列模型自然出局。
+ * **无兜底**：AND 零命中就是零命中（提示「没有匹配」、退出码 1，走「问 lab / 新增」流程），
+ * 不回退 OR——回退会让系列词误召复发。
+ * 命中可能多个——由技能用 `multiple` 的 `question` 让用户二次确认真实家族。
  */
 export function matchesQuery(query, fields) {
   const normalized = normalizeKey(query)
@@ -118,8 +124,8 @@ export function matchesQuery(query, fields) {
     .some((field) => {
       const target = normalizeKey(field)
       if (target === "") return false
-      if (target.includes(normalized) || normalized.includes(target)) return true
-      return tokens.some((token) => target.includes(token))
+      if (target.includes(normalized)) return true
+      return tokens.length > 0 && tokens.every((token) => target.includes(token))
     })
 }
 

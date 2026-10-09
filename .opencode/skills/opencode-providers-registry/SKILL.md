@@ -54,8 +54,8 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs <子命�
 node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<模型 key / 显示名 / 上游 modelID>"
 ```
 
-`search` 是**宽松匹配（召回优先）**：归一化（大小写、`. _ / \` 与 `-` 等价、词序无关、忽略版本数字）后**互相包含即命中**——
-所以一次搜索**可能召回多个候选**，也可能召回「**相似但不同**」的模型（如搜 `glm-5` 会召回 `glm-5-air`）。命中必须**分档**：
+`search` 是**宽松匹配**：归一化（大小写、`. _ / \` 与 `-` 等价、词序无关、丢弃纯数字 token）后，**查询的全部显著 token 都命中**才算（**AND**）——
+**专治系列词跨家族误召**：flash / air / mini 等系列词跨家族共用，若按「任一 token」命中，搜 `glm-5.3-flash` 会因共有 token `flash` 把 `deepseek-v4.1-flash` 一并召回；AND 要求家族词也命中。**无兜底**：AND 零命中就报「没有匹配」，不回退宽松。所以一次搜索仍**可能召回多个候选**（同 token 的家族内多候选，如搜 `glm-5` 召回 `glm-5-air`），也可能命中「**相似但不同**」的模型。命中必须**分档**：
 
 | search 结果 | 处理 |
 |---|---|
@@ -113,7 +113,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 | **删** | 删供应商/模型/共享模型 | 用 `remove-*`（安全约束见下） |
 
 > 路由 A 必须带**一个模型**：注册表 schema 要求每个 provider 的 `models` 非空，脚本也据此拒绝空模型。
-> 确认这家还不存在要**用 `show <id>` 判定**（不存在会明确报错）——别只看 `search`：它是**宽松召回**，别家同 token 也会被命中，不等于这家存在（例：搜 `kimi-gw` 会因 token `kimi` 召回 `kimi-k3`，而 `kimi-gw` 并不存在）。已存在就走路由 B，别重复建供应商（撞 id 会报错）。
+> 确认这家还不存在要**用 `show <id>` 判定**（不存在会明确报错）——别只看 `search`：它是**宽松匹配**，「相似但不同」的模型也会命中，不等于这家存在（例：若注册表里只有 `kimi-k3-air`，搜 `kimi-k3` 也会命中它——后者归一化后包含前者——但 `kimi-k3` 本身并不存在）。已存在就走路由 B，别重复建供应商（撞 id 会报错）。
 
 删除的安全约束（CLI 强制）：
 
@@ -322,14 +322,14 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs search "<
 
 ### 路由 C：模糊命中时二次确认复用（**精确命中不用问，直接 `--base`**）
 
-**动态选项模板**（lab 题见下，同样动态）：把 `search` 宽松召回的候选**逐条**填进 `options`，不要照搬占位文字。
+**动态选项模板**（lab 题见下，同样动态）：把 `search` 命中的候选**逐条**填进 `options`，不要照搬占位文字。
 
 ```json
 {
   "questions": [
     {
       "header": "复用已有模型",
-      "question": "search 宽松召回以下候选（可能不止一个，也可能只是相似）。勾选**与本模型同族**的候选来复用；都不是就选最后一项。",
+      "question": "search 命中以下候选（可能不止一个，也可能只是相似）。勾选**与本模型同族**的候选来复用；都不是就选最后一项。",
       "multiple": true,
       "options": [
         { "label": "复用 <lab>/<model>", "description": "search 命中的每一项各列一条。**只有归一化后完全相等才标「推荐」**；相似但不同（如 glm-5 vs glm-5-air）一律不标推荐" },
