@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-09
+
 ### Added
 
 - 插件：**注册表后台自动刷新**——服务端入口 `setup()` 之后每 **30 分钟**做一次**非 force** 的 TTL 检查（TTL 仍 6h，6h 内只读缓存零网络）；**只有内容真变了（`source === "network"`）才** `integration.reload()` + `provider.reload()`，未变不碰 `/models`；上游不可达时保留现有注册、下个 tick 重试（**启动时拉不到也能自行恢复，无需重启**）。定时器 `unref()`，且 `setup()` **返回 cleanup**（热重载 / location 关闭时 `clearInterval`，**不泄漏**）；间隔可用 `options.refreshIntervalMs` 覆盖（≤0 禁用）。
