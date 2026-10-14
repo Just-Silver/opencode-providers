@@ -1,0 +1,31 @@
+{
+  "name": "Deepseek V4.1 Flash Ultrafast",
+  "limit": {
+    "context": 1048576,
+    "output": 393216
+  },
+  "variants": [
+    {
+      "id": "low",
+      "settings": {
+        "reasoningEffort": "low"
+      }
+    },
+    {
+      "id": "high",
+      "settings": {
+        "reasoningEffort": "high"
+      }
+    },
+    {
+      "id": "max",
+      "settings": {
+        "reasoningEffort": "max"
+      }
+    }
+  ],
+  "input": [
+    "text",
+    "image"
+  ]
+}
