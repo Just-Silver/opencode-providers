@@ -150,11 +150,12 @@
   收尾时清掉；只保留明确告知过的配置备份
 - **不留死代码**：声明了却没人用的 export/可达不到的钩子都算（本项目无 lint，靠自觉 + 单测）。
   删钩子前先在 opencode 源码里确认它真的不可达（例：`options.registryUrl` 经 config 对象条目**可达** → 留下并补单测）
-- **`--base` 引用的模型不许再写 `name`/`limit`（CLI 不拦，但 `node --test` 必红）**：`tests/registry.test.ts:77-89`
-  钉住「引用了 base 的模型：name/limit 继承 canon，各家只覆盖 `modelID`」，而 `resolveModelSpec` 是整字段替换
-  （`{...base, ...overrides}`）⇒ provider 层写了 `--model-name` / `--context`+`--output` 就不等于 canon 的值，测试报
-  `actual ≠ expected`。**要独立显示名的同参模型 → 各建 canon**（同 lab，参数仅 `name` 不同；`check` 的「参数完全相同」
-  含 `name`，故不报重复）。2026-10-14 给 `r4-coder` 加 `deepseek-v4.1-flash-fast`/`-ultrafast` 时实测
+- **`--base` 引用的模型不许再写 `name`/`limit`（入口已硬拦）**：`--base` 只允许 `modelID`——`add-*` / `set-model` 带
+  `--model-name`/`--context`/`--output`/`--variant`/`--input` 一律报错（`spec.mjs` 的 `assertBaseIsReuseOnly`；`set-*` 的
+  `--unset` 清空仍放行），`check` 对**手改**出来的同类数据出提醒（CI 跑 `check --strict`，故 CI 也会拦）。
+  原因：`resolveModelSpec` 是整字段替换（`{...base, ...overrides}`），覆盖后装配值与 canon 不一致 →
+  `tests/registry.test.ts:77-89`（base 模型继承 canon 的 name/limit）必红。**要独立显示名的同参模型 → 同 lab 另建 canon**
+  （参数仅 `name` 不同；`check` 的「参数完全相同」含 `name`，故不报重复）。2026-10-14 实测本坑后修
 
 # 技能（`.opencode/skills/`）
 

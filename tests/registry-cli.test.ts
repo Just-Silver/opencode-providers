@@ -409,18 +409,35 @@ test("add-model 给了不止一个来源 → 报错", () => {
   assert.match(result.stderr, /只能给一个/)
 })
 
-test("add-model --base + limit → limit 写在 provider 层（覆盖），canon 不动", () => {
+test("复用共享模型（--base）时只允许再给 --model-id：name/limit/variants 由 canon 决定", () => {
   const root = freshRoot()
   const before = readJson(file(root, "models", "anchor", "base-model.json"))
-  const result = cli(
+
+  const withLimit = cli(
     ["add-model", "--provider", ANCHOR_ID, "--key", "capped", "--base", ANCHOR_BASE, "--context", "1", "--output", "1"],
     root,
   )
-  assert.equal(result.status, 0, result.stderr)
-  assert.deepEqual(readJson(file(root, "providers", ANCHOR_ID, "models.json")).capped, {
-    base: ANCHOR_BASE,
-    limit: { context: 1, output: 1 },
-  })
+  assert.equal(withLimit.status, 1)
+  assert.match(withLimit.stderr, /只能再给 --model-id/)
+
+  const withName = cli(
+    ["add-model", "--provider", ANCHOR_ID, "--key", "named", "--base", ANCHOR_BASE, "--model-name", "Named"],
+    root,
+  )
+  assert.equal(withName.status, 1)
+  assert.match(withName.stderr, /只能再给 --model-id/)
+  assert.match(withName.stderr, /--lab/)
+
+  const withVariant = cli(
+    ["add-model", "--provider", ANCHOR_ID, "--key", "varied", "--base", ANCHOR_BASE, "--variant", 'low:{"reasoningEffort":"low"}'],
+    root,
+  )
+  assert.equal(withVariant.status, 1)
+  assert.match(withVariant.stderr, /只能再给 --model-id/)
+
+  // 拒绝就是拒绝：既不能落盘，也不能动到 canon
+  const models = readJson(file(root, "providers", ANCHOR_ID, "models.json"))
+  for (const key of ["capped", "named", "varied"]) assert.equal(models[key], undefined, `${key} 不该被写入`)
   assert.deepEqual(readJson(file(root, "models", "anchor", "base-model.json")), before)
 })
 
@@ -686,6 +703,20 @@ test("check：两个 canon 参数完全相同 → 提醒（重复家族）", () 
   assert.match(warn.stdout, /参数完全相同的共享模型/)
 })
 
+test("check：手改出来的「base + 覆盖字段」→ 提醒（--strict 失败）", () => {
+  const root = freshRoot()
+  const modelsPath = file(root, "providers", ANCHOR_ID, "models.json")
+  const models = readJson(modelsPath)
+  models[ANCHOR_BASE_ONLY].name = "Hand written override"
+  writeFileSync(modelsPath, `${JSON.stringify(models, null, 2)}\n`)
+  cli(["sync"], root)
+
+  const warn = cli(["check"], root)
+  assert.equal(warn.status, 0, warn.stderr)
+  assert.match(warn.stdout, /在复用共享模型/)
+  assert.equal(cli(["check", "--strict"], root).status, 1)
+})
+
 test("set-model：字段补丁 + --unset 清空；非法 --unset 报错", () => {
   const root = freshRoot()
   const set = cli(
@@ -701,6 +732,26 @@ test("set-model：字段补丁 + --unset 清空；非法 --unset 报错", () => 
   const bad = cli(["set-model", "--provider", ANCHOR_ID, "--key", ANCHOR_BASE_ONLY, "--unset", "nope"], root)
   assert.equal(bad.status, 1)
   assert.match(bad.stderr, /--unset nope 不支持/)
+})
+
+test("set-model：仍在复用共享模型时不许写 name/limit（--unset base 之后才允许）", () => {
+  const root = freshRoot()
+  const modelsPath = file(root, "providers", ANCHOR_ID, "models.json")
+
+  const withLimit = cli(["set-model", "--provider", ANCHOR_ID, "--key", ANCHOR_BASE_ONLY, "--context", "1000", "--output", "100"], root)
+  assert.equal(withLimit.status, 1)
+  assert.match(withLimit.stderr, /仍在复用共享模型/)
+
+  const withName = cli(["set-model", "--provider", ANCHOR_ID, "--key", ANCHOR_BASE_ONLY, "--model-name", "Nope"], root)
+  assert.equal(withName.status, 1)
+  assert.match(withName.stderr, /仍在复用共享模型/)
+
+  assert.deepEqual(readJson(modelsPath)[ANCHOR_BASE_ONLY], { base: ANCHOR_BASE })
+
+  // 覆盖 modelID 仍然是复用的正常用法
+  const override = cli(["set-model", "--provider", ANCHOR_ID, "--key", ANCHOR_BASE_ONLY, "--model-id", "upstream/shared"], root)
+  assert.equal(override.status, 0, override.stderr)
+  assert.deepEqual(readJson(modelsPath)[ANCHOR_BASE_ONLY], { base: ANCHOR_BASE, modelID: "upstream/shared" })
 })
 
 test("set-provider：改名 / --unset baseurl（未传字段保持原样）", () => {

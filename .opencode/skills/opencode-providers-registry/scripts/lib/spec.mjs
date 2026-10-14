@@ -93,7 +93,35 @@ export function buildModelSpec(flags, { key, allowBase, allowModelID = true }) {
   const input = lastOf(flags, "input")
   if (typeof input === "string" && input.trim() !== "") spec.input = parseInputList(input)
 
+  assertBaseIsReuseOnly(spec, { key })
   return spec
+}
+
+/**
+ * 引用共享模型（`base`）的 provider 模型只允许再覆盖 `modelID`。
+ *
+ * name/limit/variants/input 一律由 canon 决定：`resolveModelSpec` 是整字段替换（`{...base, ...overrides}`），
+ * 覆盖后装配出来的值就与 canon 不一致，随仓数据不变式（`tests/registry.test.ts`「引用了 base 的模型继承
+ * canon 的 name/limit」）当场变红。所以在这里直接拒绝，把「同参但想独立命名」的场景逼回 `--lab` 另建 canon。
+ */
+/** `base` 之外一律不许写的模型字段（provider 层只允许 `modelID`）。 */
+export const OVERRIDES_FORBIDDEN_WITH_BASE = ["name", "limit", "variants", "input"]
+
+function assertBaseIsReuseOnly(spec, { key, unset = false }) {
+  if (spec.base === undefined) return
+  const offending = OVERRIDES_FORBIDDEN_WITH_BASE.filter((field) => spec[field] !== undefined)
+  if (offending.length === 0) return
+  if (unset) {
+    throw new CliError(
+      `模型 "${key}" 仍在复用共享模型（base=${spec.base}）：${offending.join("/")} 来自共享模型，不能写在 provider 层。\n` +
+        `  要独立就 set-model --provider <id> --key ${key} --unset base 并同时补齐 --model-name/--context/--output；` +
+        `只改参数字段请用 set-shared-model --lab <lab> --key <model>`,
+    )
+  }
+  throw new CliError(
+    `复用共享模型（base=${spec.base}）时只能再给 --model-id：${offending.join("/")} 由共享模型决定。\n` +
+      `  要独立的显示名或参数：用 --lab <lab> 另建共享模型（同 lab、参数一致也可以），本家独有用 --inline`,
+  )
 }
 
 /**
@@ -213,6 +241,7 @@ export function applyModelPatch(tree, current, flags, { allowBase, allowModelID,
     if (unsets.has("base")) delete spec.base
   }
 
+  assertBaseIsReuseOnly(spec, { key, unset: true })
   return spec
 }
 

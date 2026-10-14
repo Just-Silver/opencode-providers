@@ -8,7 +8,7 @@ import { join } from "node:path"
 import { parseRegistry } from "../../../../../plugin/opencode-providers/registry/schema.ts"
 import { CliError, checkBaseRef, lastOf, rejectUnknownFlags } from "./cli.mjs"
 import { assemble, computeRevision, loadTree, parseTree, providerDirs, resolveRoot } from "./store.mjs"
-import { comparableFields, findIdenticalShared, sameValue } from "./spec.mjs"
+import { OVERRIDES_FORBIDDEN_WITH_BASE, comparableFields, findIdenticalShared, sameValue } from "./spec.mjs"
 import { matchesModel, matchesQuery, matchesShared, printResult, reportFailure, summarize, summarizeShared } from "./report.mjs"
 
 export function commandList(flags) {
@@ -182,6 +182,19 @@ export function commandCheck(flags) {
       if (ref !== undefined) {
         warnings.push(`providers/${entry.id}/models.json 的 "${key}" 与共享模型 "${ref}" 参数相同，建议改用 base 复用`)
       }
+    }
+  }
+
+  // 4a) 引用了 base 的模型还带 provider 层覆盖字段 → 手改出来的坏数据（CLI 已拒绝写）
+  for (const entry of tree.providers) {
+    for (const [key, spec] of Object.entries(entry.models)) {
+      if (spec.base === undefined) continue
+      const overrides = OVERRIDES_FORBIDDEN_WITH_BASE.filter((field) => spec[field] !== undefined)
+      if (overrides.length === 0) continue
+      warnings.push(
+        `providers/${entry.id}/models.json 的 "${key}" 在复用共享模型 "${spec.base}" 时又写了 ${overrides.join("/")}：` +
+          `base 只能覆盖 modelID，其余一律来自 canon（否则随仓数据不变式测试变红）`,
+      )
     }
   }
 
