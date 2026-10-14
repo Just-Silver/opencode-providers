@@ -150,11 +150,16 @@
   收尾时清掉；只保留明确告知过的配置备份
 - **不留死代码**：声明了却没人用的 export/可达不到的钩子都算（本项目无 lint，靠自觉 + 单测）。
   删钩子前先在 opencode 源码里确认它真的不可达（例：`options.registryUrl` 经 config 对象条目**可达** → 留下并补单测）
+- **`--base` 引用的模型不许再写 `name`/`limit`（CLI 不拦，但 `node --test` 必红）**：`tests/registry.test.ts:77-89`
+  钉住「引用了 base 的模型：name/limit 继承 canon，各家只覆盖 `modelID`」，而 `resolveModelSpec` 是整字段替换
+  （`{...base, ...overrides}`）⇒ provider 层写了 `--model-name` / `--context`+`--output` 就不等于 canon 的值，测试报
+  `actual ≠ expected`。**要独立显示名的同参模型 → 各建 canon**（同 lab，参数仅 `name` 不同；`check` 的「参数完全相同」
+  含 `name`，故不报重复）。2026-10-14 给 `r4-coder` 加 `deepseek-v4.1-flash-fast`/`-ultrafast` 时实测
 
 # 技能（`.opencode/skills/`）
 
 - `opencode-providers-registry` —— 维护分文件注册表（`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`）：**lab 模型层 + 来源三选一**——`add-provider`/`add-model` **必须**声明模型来源 `--lab <lab>`（建家族 canon `models/<lab>/<model>.json`）/ `--base <lab>/<model>`（复用，**新增前先 `search`（归一化 + 全 token AND：系列词不跨家族误召，可能命中多个）命中就用**）/ `--inline`（本家独有；**独家代理 ≠ 本家独有**）；**命中多个 / 相似但不同 → 用可多选（`multiple`）的 `question` 让用户二次确认，模糊命中不标「推荐」**；**没命中时技能先用 `question` 问「家族标签 lab」**（选项**动态列出已有 lab** + 本家独有 / 新建，**支持多选**；不许自己编 lab、不许默认内联）+ **改**（`set-provider`/`set-model`/`set-shared-model`，字段补丁 + `--unset`）+ **删**（`remove-provider`/`remove-model`/`remove-shared-model`，带安全约束：不许删空 provider、不许删仍被引用的共享模型；**删后自动清理无人引用的 canon**）、
-  **最小字段铁律**（严格只写最小字段，其余不写；provider 层 **override-only**——`--lab` 时只写 `base`（+ 可选 `modelID`），参数进 canon；模型**能力** `input` 由技能用多选问出后再写）、协议 → package（`/v1/chat/completions` /
+  **最小字段铁律**（严格只写最小字段，其余不写；provider 层 **override-only**——`--lab`/`--base` 时只写 `base`（+ 可选 `modelID`），参数进 canon；模型**能力** `input` 由技能用多选问出后再写）、协议 → package（`/v1/chat/completions` /
   `/v1/responses` / `/v1/messages` 三种形态）、**一次性用 `question` 收集信息**、改完必须 push + 触发重载 + 验证（**提交/推送走脚本 `commit [--push]`，别手打 git**）。
   **agent 禁止直接读整份注册表**（会随供应商/模型增长而变大）：查/改全走随技能 CLI
   `.opencode/skills/opencode-providers-registry/scripts/registry.mjs`（入口 + `scripts/lib/` 子模块：`cli`/`store`/`spec`/`report`/`git`/`commands-{read,write,git}`）
