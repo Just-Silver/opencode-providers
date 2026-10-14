@@ -97,6 +97,9 @@ export function buildModelSpec(flags, { key, allowBase, allowModelID = true }) {
   return spec
 }
 
+/** `base` 之外一律不许写的模型字段（provider 层只允许 `modelID`）。 */
+export const OVERRIDES_FORBIDDEN_WITH_BASE = ["name", "limit", "variants", "input"]
+
 /**
  * 引用共享模型（`base`）的 provider 模型只允许再覆盖 `modelID`。
  *
@@ -104,9 +107,6 @@ export function buildModelSpec(flags, { key, allowBase, allowModelID = true }) {
  * 覆盖后装配出来的值就与 canon 不一致，随仓数据不变式（`tests/registry.test.ts`「引用了 base 的模型继承
  * canon 的 name/limit」）当场变红。所以在这里直接拒绝，把「同参但想独立命名」的场景逼回 `--lab` 另建 canon。
  */
-/** `base` 之外一律不许写的模型字段（provider 层只允许 `modelID`）。 */
-export const OVERRIDES_FORBIDDEN_WITH_BASE = ["name", "limit", "variants", "input"]
-
 function assertBaseIsReuseOnly(spec, { key, unset = false }) {
   if (spec.base === undefined) return
   const offending = OVERRIDES_FORBIDDEN_WITH_BASE.filter((field) => spec[field] !== undefined)
