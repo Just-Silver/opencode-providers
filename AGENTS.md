@@ -129,6 +129,10 @@
   **provider/model 注册是按 location 隔离的**，不带 location 的 RPC 只刷服务端的**默认目录**（`/api/location` 返回的那个），
   用户所在目录的注册一直停在旧状态。现象：`/api/model`（默认目录）里有新模型、选择器里没有。
   排查口径：**按自己所在目录的 location 调 `/api/model`**，与默认目录逐一对比 —— **两边模型数不同就是这个**。
+  HTTP 指定 location 只有**请求头** `x-opencode-directory: <目录>` 一条路（2026-10-14 实测：`?location=` → 400、
+  `?directory=`/`x-directory`/`x-opencode-location` **静默回落默认目录**——回落比报错更坑，别拿它们的输出去对比）；
+  `curl -H "authorization: Basic …" -H "x-opencode-directory: E:/path" <url>/api/model` 的响应体会回显
+  `location.directory`，先确认它确实是你那个目录再看模型数。
   **删除方向同理**：注册表里移除的模型**不会自动消失**——拉取式、无推送，且 `setup()` 之外不主动重载，所以某 location 会一直
   显示旧模型，直到它重载 / 强制刷新（Ctrl+R）或重启；重载时 `provider.reload()` 按干净注册表重建（内核 `editor.add` 是**整条替换**，
   `packages/core/src/provider.ts:323-329`），已删模型随之消失。**每个 location 独立**：默认目录干净 ≠ 你所在目录干净；
