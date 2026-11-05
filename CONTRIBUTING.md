@@ -32,6 +32,7 @@ plugin/opencode-providers/             ← 插件源码（npm 包的 server / tu
   view/                                ← /connect-providers 交互
 .opencode/skills/opencode-providers-registry/   ← 维护注册表的技能与 CLI
 scripts/                               ← changelog.mjs（版本/发布说明）、smoke-api.mjs（真机冒烟）
+tools/open-design/                     ← Open Design 供应商诊断：od_ttft.py、probe_upstream.py（Python，不入 npm 包）
 tests/                                 ← node --test 用例
 docs/                                  ← 深度参考（见「文档地图」）
 ```

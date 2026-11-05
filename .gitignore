@@ -122,3 +122,7 @@ public
 # OS
 .DS_Store
 Thumbs.db
+
+# Python 诊断工具（tools/）
+__pycache__/
+*.pyc
