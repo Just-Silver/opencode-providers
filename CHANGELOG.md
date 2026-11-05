@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **技能/技能 CLI：`--base` 现在只允许覆盖 `modelID`（入口硬拦）**——`add-provider` / `add-model` / `set-model` 给 `--base` 的模型再传 `--model-name` / `--context` / `--output` / `--variant` / `--input` 一律报错并指路（要独立的显示名/额度就 `--lab <lab>` 另建 canon，或 `set-shared-model` 改 canon）；`set-model` 的 `--unset` 清空仍放行（解除复用走 `--unset base` + 补齐 `--model-name`/`--context`/`--output`）。原因：`resolveModelSpec` 是整字段替换，provider 层覆盖 `name`/`limit` 后装配值就与 canon 不一致，随仓数据的继承不变式（`tests/registry.test.ts`「引用了 base 的模型继承 canon 的 name/limit」）必然变红。`check` 新增一条提醒兜住**手改**出来的同类坏数据（CI 跑 `check --strict`，故也会被拦）。
+
 ## [0.3.4] - 2026-10-09
 
 ### Added
