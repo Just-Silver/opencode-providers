@@ -82,7 +82,7 @@ test("真实模型：共享 base + 各自 modelID 覆盖（走注册用的 build
       buildProviderModels(registry, id, registry.providers[id]!).find((model) => model.id === key),
       `${id}/${key}`,
     )
-    assert.equal(assembled.name, sharedSpec.name, `${id}/${key} 应继承共享模型 name`)
+    assert.equal(assembled.name, spec.name ?? sharedSpec.name, `${id}/${key} 应继承共享模型 name（显式覆盖除外）`)
     assert.deepEqual(assembled.limit, sharedSpec.limit, `${id}/${key} 应继承共享模型 limit`)
     // modelID 默认等于 key，除非显式覆盖
     assert.equal(assembled.modelID, spec.modelID ?? key)

@@ -193,7 +193,7 @@ export function commandCheck(flags) {
       if (overrides.length === 0) continue
       warnings.push(
         `providers/${entry.id}/models.json 的 "${key}" 在复用共享模型 "${spec.base}" 时又写了 ${overrides.join("/")}：` +
-          `base 只能覆盖 modelID，其余一律来自 canon（否则随仓数据不变式测试变红）`,
+          `base 只能覆盖 modelID / name，参数一律来自 canon（否则随仓数据不变式测试变红）`,
       )
     }
   }

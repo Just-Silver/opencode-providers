@@ -180,7 +180,7 @@ registry/
 
 ```jsonc
 {
-  "some-model": { "base": "some-lab/some-model", "name": "Some Model", "limit": { "context": 131072, "output": 16384 } },
+  "some-model": { "base": "some-lab/some-model", "name": "Some Model" },
   "some-model-fast": { "base": "some-lab/some-model", "modelID": "some-model-2026-01" }
 }
 ```
@@ -209,7 +209,7 @@ registry/
 | `provider.json` `baseURL` | API 端点；与 `settings` 合并后作为 provider `settings` |
 | `provider.json` `keyLabel` | `/connect-providers` 里 API Key 输入框的提示，默认 `Paste API key`（技能 CLI 保持最小字段，不写它） |
 | `models.json` 的 key | 模型 ID（`provider/model` 里的 model 段）；各项字段见下方 `模型 …` 各行 |
-| 模型 `base` | 引用顶层共享模型（值形如 `<lab>/<model>`，对应 `registry/models/<lab>/<model>.json`），先铺共享参数再用本项覆盖 |
+| 模型 `base` | 引用顶层共享模型（值形如 `<lab>/<model>`，对应 `registry/models/<lab>/<model>.json`），先铺共享参数再用本项覆盖；**只允许覆盖 `modelID` / `name`**，`limit`/`variants`/`input` 属于 canon |
 | 模型 `modelID` | 发给上游的真实模型/部署 ID，默认等于上面的 key |
 | 模型 `limit` | `context` / `output` 必填（无 `base` 时），`input` 可选 |
 | 模型 `cost` | 每百万 token 美元；`cache_read`/`cache_write` 可选 |
@@ -242,7 +242,7 @@ node .opencode/skills/opencode-providers-registry/scripts/registry.mjs push     
 ```
 
 - **新增模型必须声明来源（三选一）**：`--lab <lab>` 建家族 canon（能说出造它的 lab 时；参数进 canon）、`--base <lab>/<model>` 复用已有 canon（**新增前先 `search`；它是宽松匹配**——归一化 + 全 token AND（系列词不跨家族误召；可能命中多个、也可能只是「相似但不同」→ **用可多选（`multiple`）的 `question` 让用户二次确认，模糊命中不标「推荐」**）、`--inline` 本家独有（必须自带 limit）。没命中时技能会先问「家族标签 lab」（选项**动态列出已有 lab** + 本家独有 / 新建，**支持多选**）——**不许自己编 lab、不许默认内联**。
-- **provider 层 override-only**：`--lab` 时 provider 只写 `base`（+ 可选 `modelID`）；`--base` 时给 `--context/--output` 是写在该 provider 的**覆盖**（canon 不动）。
+- **provider 层 override-only**：`--lab` 时 provider 只写 `base`（+ 可选 `modelID` / 显示名 `name`）；`--base` 时同样只允许覆盖 `modelID` / `name`，`--context/--output`/`--variant` 属于 canon 参数（写了会被 CLI 拒绝，改参数用 `set-shared-model`）。
 - `check [--strict]` 做更全体检：悬空 `base` 引用 / 孤儿共享模型 / **参数完全相同的两个 canon（重复家族）** / 重复 baseURL / `input` 缺 text / 空目录。
 - 删除（`remove-provider` / `remove-model`）后**自动清理无人引用的 canon**（并清空空 lab 目录）。
 - 写命令结束会**自动重算并重写** `index.json`；手改了子文件就用 `sync` 补齐，再 `validate`。
