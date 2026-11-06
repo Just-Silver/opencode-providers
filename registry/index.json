@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": "sha256:02704c3d15bc2f7284120467b50ebaf0bf3d8da1e3635eb005010d22bd8963f5",
+  "revision": "sha256:828c2b94b7bcd2d77fe5bd570d8b13e7fa1a237f7d481df9c0a76912fb585988",
   "providers": [
     "command-code",
     "open-design",
