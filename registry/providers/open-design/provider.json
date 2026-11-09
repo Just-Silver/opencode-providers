@@ -1,5 +1,5 @@
 {
   "name": "Open Design",
-  "package": "@opencode/ai/providers/openai-compatible",
+  "package": "@opencode/ai/providers/openai-compatible/responses",
   "baseURL": "https://amr-link.open-design.ai/v1"
 }
