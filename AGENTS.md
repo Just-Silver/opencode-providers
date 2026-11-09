@@ -197,4 +197,4 @@
 | `docs/opencode-plugin-provider-no-config.md` | 本插件「零配置」设计与证据 | opencode 通用教程 |
 | `docs/npm-distribution-and-testing.md` | 本项目 npm 分发 / 测试实践 | 注册表数据 |
 | `docs/specs/`、`docs/plans/` | 历史设计 / 计划（只读冻结） | 新内容 |
-| `tools/open-design/README.md` | Open Design 供应商的诊断工具：延迟测量 / 上游探测 | 插件实现、注册表数据 |
+| `tools/open-design/README.md` | Open Design 供应商的诊断工具：延迟测量 / 上游探测 / 流式工具调用分片验证（含为什么走 responses 协议） | 插件实现、注册表数据 |

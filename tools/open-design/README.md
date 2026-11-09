@@ -1,16 +1,18 @@
-<!-- 职责：说明本目录两个工具（od_ttft.py 测延迟、probe_upstream.py 探上游）的用法、指标口径与判读方法；不写 Open Design 客户端用法，不写 Clash / 代理配置。 -->
+<!-- 职责：说明本目录三个工具（od_ttft.py 测延迟、probe_upstream.py 探上游、probe_tool_stream.py 验工具调用分片）的用法、指标口径与判读方法，以及为什么这家走 responses 协议；不写 Open Design 客户端用法，不写 Clash / 代理配置。 -->
 
-# Open Design：延迟测量与上游探测
+# Open Design：延迟测量、上游探测与工具调用分片验证
 
-`registry/providers/open-design` 这个供应商的运维工具：测它的延迟，并确认它背后真实的上游。
-两个独立脚本，只依赖 Python 3.9+ 标准库，不属于 npm 包发布内容（`package.json` 的 `files` 白名单不含 `tools/`）。
+`registry/providers/open-design` 这个供应商的运维工具：测它的延迟，确认它背后真实的上游，
+并验证流式工具调用的分片键是否可靠。
+三个独立脚本，只依赖 Python 3.9+ 标准库，不属于 npm 包发布内容（`package.json` 的 `files` 白名单不含 `tools/`）。
 
 | 文件 | 作用 |
 | --- | --- |
 | `od_ttft.py` | 测 Open Design API 的首字节 / 首 token 延迟，并拆成「链路」和「模型」两段 |
 | `probe_upstream.py` | 判断 API 背后真实在给谁干活（流元数据 + 错误码 + 响应头） |
+| `probe_tool_stream.py` | 对比 `/chat/completions` 与 `/responses` 的流式工具调用分片键是否可靠 |
 
-两个脚本都从仓库根目录运行：`python tools/open-design/od_ttft.py`。
+三个脚本都从仓库根目录运行：`python tools/open-design/od_ttft.py`。
 
 ## Key 从哪来
 
@@ -99,3 +101,64 @@ python probe_upstream.py --only baseline  # 只看流元数据
 - 短 prompt 首 token p50 ~2.2~3.1s（随模型侧波动），其中链路约 1.2s
 - 12k 字符上下文首 token p50 ~3.2s（走香港）/~4.4s（直连）
 - 链路与模型各占一半左右：换路线能省 1s 量级，剩下的是上游出首 token 的时间
+
+## probe_tool_stream.py：流式工具调用的分片键
+
+```bash
+python probe_tool_stream.py                  # chat 与 responses 各 12 次
+python probe_tool_stream.py -n 40 -c 3       # 加大样本 / 并发
+python probe_tool_stream.py --only chat      # 只测一条路由
+```
+
+两条路由把「分散在多个 SSE chunk 里的同一个工具调用」拼回来用的键不一样：
+
+| 路由 | 分片键 | 客户端怎么用 |
+| --- | --- | --- |
+| `/chat/completions` | `choices[].delta.tool_calls[].index` | 同 index 的 `id`/`name`/`arguments` 累加成一个调用 |
+| `/responses` | `response.function_call_arguments.delta.item_id` | item_id 由 `response.output_item.added` 注册，一一对应 |
+
+脚本逼模型**一次给出多个并行调用**，然后按上面的键聚合，任一情况即记一次异常：
+同一键绑定两个不同 id、同一 id 出现在两个键、拼出来的 arguments 不是单个合法 JSON 对象、
+delta 的 item_id 从未注册。
+
+### 2026-11-09 实测：chat 会串号，responses 不会
+
+同一 prompt（要求并行 4 个调用）、同样并发 3，各跑 20 次：
+
+| 路由 | 正常 | 异常 | 现象 |
+| --- | --- | --- | --- |
+| `/chat/completions` | 18 | **2** | 第二个调用复用了 `index=0`，两个 arguments 被拼成 `{"path":"a.axaml"...}{"path":"b.axaml"...}` |
+| `/responses` | 20 | 0 | 80 个调用全部 item_id 唯一、arguments 合法 |
+
+复现时抓到的原始 delta 序列（`--only chat`，出现即停）：第一个调用 `call_00_…` 用 `index=0` 正常收完
+`arguments`，紧接着第二个调用 `call_01_…` **也用 `index=0`** 重新开始吐参数。opencode 按 index 归并，
+于是把两段拼成一个字符串 → `JSON.parse` 失败 → `tool.input-json`。
+
+结论：**这是上游（BytePlus Ark）在 chat 兼容层上的分片 bug，不是网关限流，也不是客户端解析问题。**
+把供应商切到 responses 协议能绕开它：
+
+```
+node .opencode/skills/opencode-providers-registry/scripts/registry.mjs set-provider --id open-design --protocol responses
+```
+
+对应 `provider.json` 的 `package` 变成 `@opencode/ai/providers/openai-compatible/responses`
+（底层走 `protocols/openai-compatible-responses.ts`，`OpenResponses.protocol` + `/responses` 端点）。
+
+### responses 路由实测通过的检查项
+
+| 检查 | 结果 |
+| --- | --- |
+| `store:false` + `include:["reasoning.encrypted_content"]`（opencode 默认） | 200；但 reasoning item **不带** `encrypted_content`，回放时只能带 `id`+`summary`，上游接受 |
+| 多轮 `function_call` + `function_call_output` 回放 | 200，能续上并给出结论 |
+| `function_call_arguments.done.arguments` 与 delta 累加值一致 | 一致（不依赖 done 也不会拼错） |
+| 扁平 tools / `strict:true` / `tool_choice` / `parallel_tool_calls` | 全部 200 |
+| `reasoning.effort` = low/medium/high/max/minimal | 全部 200（不校验枚举，也不会 400） |
+| 图片输入（`input_image` + data URL） | 200 |
+| `usage.input_tokens_details.cached_tokens` | 有值，前缀缓存与 chat 路由表现一致（同前缀第二次命中 3840） |
+| `max_output_tokens` 到 393216 | 200（流式下也没复现过 500） |
+
+**唯一注意点**：`max_output_tokens=393216` 曾偶发一次 `HTTP 500
+{"error":{"code":"internal_error","message":"failed to evaluate membership entitlement"}}`（单发不上流式），
+重试即好、流式下 16 次全过。opencode 自己会把输出上限压到 256000（`OUTPUT_TOKEN_MAX`），
+所以这条不用担心，遇到 500 直接重试即可。
+
