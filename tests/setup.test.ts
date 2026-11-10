@@ -109,24 +109,16 @@ interface FakeContext {
   readonly storage: Map<string, unknown>
   readonly reloads: { integration: number; provider: number }
   readonly registered: { handlers?: Record<string, (input: unknown, context: unknown) => Promise<unknown>> }
-  /** 插件注册的 `execute.before` 钩子（按注册顺序）。 */
-  readonly hooks: Array<(event: { tool: string; input: unknown }) => Promise<void>>
   readonly ctx: any
 }
 
-interface FakeCapabilities {
-  /** 让钩子注册抛错，模拟旧宿主 / 宿主拒绝注册。 */
-  readonly hookError?: Error
-}
-
-function fakeContext(options: Record<string, unknown> = {}, capabilities: FakeCapabilities = {}): FakeContext {
+function fakeContext(options: Record<string, unknown> = {}): FakeContext {
   const integrations = new Map<string, { id: string; name: string; metadata?: Record<string, unknown> }>()
   const methods: FakeContext["methods"] = []
   const providers: FakeContext["providers"] = []
   const storage = new Map<string, unknown>()
   const reloads = { integration: 0, provider: 0 }
   const registered: FakeContext["registered"] = {}
-  const hooks: FakeContext["hooks"] = []
 
   let integrationTransform: ((editor: any) => void) | undefined
   let providerTransform: ((editor: any) => void) | undefined
@@ -183,29 +175,9 @@ function fakeContext(options: Record<string, unknown> = {}, capabilities: FakeCa
         return { dispose: () => {} }
       },
     },
-    tool: {
-      hook: async (_name: string, callback: (event: { tool: string; input: unknown }) => Promise<void>) => {
-        if (capabilities.hookError !== undefined) throw capabilities.hookError
-        hooks.push(callback)
-        return { dispose: () => {} }
-      },
-    },
-    model: {
-      list: async () => ({
-        location: {},
-        data: [
-          {
-            id: "fixture-model",
-            providerID: "fixture-provider",
-            type: "chat",
-            variants: [{ id: "high" }],
-          },
-        ],
-      }),
-    },
   }
 
-  return { integrations, methods, providers, storage, reloads, registered, hooks, ctx }
+  return { integrations, methods, providers, storage, reloads, registered, ctx }
 }
 
 test("server 入口用随仓注册表注册 integration（带 metadata.source / keyLabel / key 方法）", async () => {
@@ -453,49 +425,4 @@ test("后台 tick：setup 返回 cleanup，调用后定时器被清掉（不泄�
     assert.equal(calls.length, callsAfterCleanup, "cleanup 后不应再有 tick 请求")
     assert.equal(state.reloads.provider, 0)
   })
-})
-
-// ── 子代理统一模型策略（真实 server 入口）──────────────────────────────────
-
-test("注册表不可达时仍可通过 RPC 设置子代理模型并影响执行前输入", async () => {
-  const state = fakeContext()
-  const errors = console.error
-  console.error = () => {}
-  try {
-    await withFetch(treeFetch({}).fetch, () => plugin.setup(state.ctx))
-  } finally {
-    console.error = errors
-  }
-  assert.equal(state.providers.length, 0, "注册表不可达 → 不注册供应商")
-
-  const initial = (await state.registered.handlers!.getSubagentModel!({}, {})) as any
-  assert.equal(initial.ok, true)
-  assert.equal(initial.supported, true)
-  assert.equal(initial.model, null)
-
-  const saved = (await state.registered.handlers!.setSubagentModel!(
-    { model: "fixture-provider/fixture-model#high" },
-    {},
-  )) as any
-  assert.equal(saved.ok, true)
-
-  const hook = state.hooks.at(-1)!
-  const input = { agent: "general", description: "d", prompt: "p" }
-  const event = { tool: "subagent", input }
-  await hook(event)
-  assert.equal(event.input.model, "fixture-provider/fixture-model#high")
-})
-
-test("钩子注册失败不影响供应商注册，RPC 明确报告策略不可用", async () => {
-  const state = fakeContext({}, { hookError: new Error("hook rejected") })
-  await withFetch(treeFetch(REGISTRY_TREE).fetch, () => plugin.setup(state.ctx))
-
-  assert.deepEqual([...state.integrations.keys()].sort(), PROVIDER_IDS)
-  assert.equal(state.providers.length, PROVIDER_IDS.length)
-
-  const summary = (await state.registered.handlers!.getSubagentModel!({}, {})) as any
-  assert.equal(summary.ok, false)
-  assert.equal(summary.supported, false)
-  assert.match((summary.errors ?? []).join("\n"), /hook rejected/)
-  assert.equal(state.hooks.length, 0)
 })

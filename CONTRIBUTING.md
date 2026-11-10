@@ -26,11 +26,10 @@ registry/                              ← 自维护注册表（GitHub raw 直�
   models/<lab>/<model>.json            ← 顶层共享模型（多家用 base 引用）
 plugin/opencode-providers/             ← 插件源码（npm 包的 server / tui 入口所在）
   index.ts                             ← server 入口：拉注册表 → 注册 integration/provider/models
-  tui.ts                               ← TUI 入口：注册 /connect-providers 与 /subagent-model 命令（不写 JSX）
-  rpc.ts                               ← RPC 定义：强制刷新 + 子代理模型策略（纯 JSON Schema）
+  tui.ts                               ← TUI 入口：注册 /connect-providers 命令（不写 JSX）
+  rpc.ts                               ← RPC 定义：注册表强制刷新（纯 JSON Schema）
   registry/                            ← 纯逻辑：schema 校验 / 分文件聚合 / 拉取缓存
-  subagent-model.ts                    ← 服务端策略：全局存储 + 执行前钩子 + 保存校验
-  view/                                ← TUI 交互：/connect-providers、/subagent-model
+  view/                                ← TUI 交互：/connect-providers
 .opencode/skills/opencode-providers-registry/   ← 维护注册表的技能与 CLI
 scripts/                               ← changelog.mjs（版本/发布说明）、smoke-api.mjs（真机冒烟）
 tools/open-design/                     ← Open Design 供应商诊断：od_ttft.py、probe_upstream.py（Python，不入 npm 包）
@@ -63,8 +62,7 @@ docs/                                  ← 深度参考（见「文档地图」�
 完整约束清单见 [AGENTS.md](./AGENTS.md)；设计背景与证据链见 `docs/`。要点：
 
 - **同目录双入口**：`index.ts`（server，拉注册表并注册）与 `tui.ts`（只注册 TUI 命令，**不读注册表**）。
-- **子代理统一模型**：服务端读全局 KV、在 `execute.before` 改写 `subagent` 的 `model`；TUI 只经 RPC 读写，
-  不缓存、不写本地存储。设计与契约见 [`docs/subagent-model-policy.md`](./docs/subagent-model-policy.md)。
+- **子代理统一模型已迁出**：本仓不再注册相关命令、策略 RPC 或工具钩子，见[迁移入口](./docs/subagent-model-policy.md)。
 - **server 入口不得 import 任何 `@opencode/*`**（实测会 `Cannot find package '@opencode/plugin'` 而加载失败）；
   `@opencode/plugin/tui` **是**注入的，TUI 入口照常 import。运行时需要的都是普通值
   （`Plugin.define` 是恒等函数、`Provider.ID.make` 就是字符串）。

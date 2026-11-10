@@ -104,5 +104,5 @@ TUI 使用原生选择弹窗与带 location 的 RPC，服务端负责保存校�
 - server / TUI 两入口 esbuild：退出码均为 0。
 - `npm pack --dry-run`：新增策略、界面模块均在白名单包内，未发布。
 - `git diff --check`：通过；未修改注册表、版本、用户配置或真实数据库。
-- RPC codec 兼容验证结论归属[策略文档](./subagent-model-policy.md#验证与已核实的宿主契约)。
+- RPC codec 兼容验证结论归属[迁出后的策略文档](https://github.com/Just-Silver/opencode-subagent-model/blob/main/docs/subagent-model-policy.md#验证与已核实的宿主契约)（在线内容待新仓推送）。
 - 未做真机 TUI 点选及实际子代理请求验证，不能据此宣称已部署或已启用。

@@ -24,9 +24,7 @@
   证据：`packages/core/src/plugin/supervisor.ts:96-111`（`failures` 里塞入重复项，`state.status="failed"`）。
 - 同目录**双入口**（`packages/plugin/src/host.ts:43` 的 `server: entry(["server",""])` / `tui: entry(["tui"])`）：
   - `index.ts` = **server 入口**：拉注册表 → 注册 integration / provider / models。**不得触碰 `context.ui`**
-  - `tui.ts` = **TUI 入口**：注册 `/connect-providers` 与 `/subagent-model` 命令与交互（**不读注册表**；
-    `/connect-providers` 读服务端已注册的 integration，`/subagent-model` 经 RPC 读写服务端策略，
-    设计与存储契约见 `docs/subagent-model-policy.md`）；
+  - `tui.ts` = **TUI 入口**：注册 `/connect-providers` 命令与交互（**不读注册表**，只读服务端已注册的 integration）；
     图层必须写 **`mode: "global"`**（图层 mode 默认 `"base"`，而提示框 push 的是 `"composer"`／补全时 `"autocomplete"`
     → 漏了就会"插件 active 但看不到命令"；证据：`packages/tui/src/context/keymap.tsx:209-214` + `component/prompt/autocomplete.tsx:474-483`）
 - **server 入口不得 import 任何 `@opencode/*`（实测踩坑，opencode 2.0.24）**：`@opencode/plugin` 只注入给 TUI 入口，
@@ -163,6 +161,15 @@
   （同名模型在不同网关的显示名/上游 id 常不同），允许覆盖，`resolveModelSpec` 的 `{...base, ...overrides}` 天然支持。
   **同参又要独立显示名 → 直接 `--model-name` 覆盖，不要另建 canon**（2026-11-07 修：旧规则逼出重复 canon + 两行同名）
 
+# 子代理功能已迁出
+
+- 本仓不再注册 `/subagent-model`、策略 RPC 或工具钩子，源码、模块和测试已移除；
+  `tui.ts` 只注册 `/connect-providers`，`rpc.ts` 只保留注册表刷新。
+- 独立项目为相邻的 `opencode-subagent-model/`（npm 名 `@justsilver/opencode-subagent-model`），
+  现行契约与迁移步骤只在该项目维护，本仓 `docs/subagent-model-policy.md` 仅为迁移入口。
+- 版本线回到已发布稳定的 `0.3.4`；不为本功能另发 npm 版本。
+- 旧设置不自动迁移：用户须先停用旧覆盖，再在新插件重新选择模型。
+
 # 技能（`.opencode/skills/`）
 
 - `opencode-providers-registry` —— 维护分文件注册表（`registry/index.json` manifest + `registry/providers/<id>/{provider,models}.json` + `registry/models/<lab>/<model>.json`）：**lab 模型层 + 来源三选一**——`add-provider`/`add-model` **必须**声明模型来源 `--lab <lab>`（建家族 canon `models/<lab>/<model>.json`）/ `--base <lab>/<model>`（复用，**新增前先 `search`（归一化 + 全 token AND：系列词不跨家族误召，可能命中多个）命中就用**）/ `--inline`（本家独有；**独家代理 ≠ 本家独有**）；**命中多个 / 相似但不同 → 用可多选（`multiple`）的 `question` 让用户二次确认，模糊命中不标「推荐」**；**没命中时技能先用 `question` 问「家族标签 lab」**（选项**动态列出已有 lab** + 本家独有 / 新建，**支持多选**；不许自己编 lab、不许默认内联）+ **改**（`set-provider`/`set-model`/`set-shared-model`，字段补丁 + `--unset`）+ **删**（`remove-provider`/`remove-model`/`remove-shared-model`，带安全约束：不许删空 provider、不许删仍被引用的共享模型；**删后自动清理无人引用的 canon**）、
@@ -198,7 +205,8 @@
 | `docs/opencode-connect-custom-provider.md` | opencode `/connect` 与自定义供应商（通用知识） | 本插件安装 |
 | `docs/opencode-plugin-provider-no-config.md` | 本插件「零配置」设计与证据 | opencode 通用教程 |
 | `docs/npm-distribution-and-testing.md` | 本项目 npm 分发 / 测试实践 | 注册表数据 |
-| `docs/subagent-model-policy.md` | 子代理统一模型策略设计 / 存储契约 / 执行边界 | 使用教程 / 注册表数据 |
+| `docs/subagent-model-policy.md` | 原子代理功能迁移入口 / 历史链接兼容 | 独立插件现行契约 |
 | `docs/subagent-model-implementation.md` | 子代理统一模型实现任务 / 接口 / 验收计划 | 使用教程 / 设计决策 |
+| `docs/subagent-model-result-implementation.md` | 子代理工具返回模型标记实施 / 验证计划 | 策略契约 / 历史功能实现过程 |
 | `docs/specs/`、`docs/plans/` | 历史设计 / 计划（只读冻结） | 新内容 |
 | `tools/open-design/README.md` | Open Design 供应商的诊断工具：延迟测量 / 上游探测 / 流式工具调用分片验证（含为什么走 responses 协议） | 插件实现、注册表数据 |

@@ -82,6 +82,30 @@
   （版本 / dist-tag / `integrity`）已可见，但 tarball URL 仍 **404**，`opencode plugin update` 会报
   `NpmInstallFailedError ... 404 .../opencode-providers-<v>.tgz`。**等几分钟重试即可**（实测约 3 分钟后 tarball 变 200），不是发布失败。
 
+### 已撤回的预发布版本（2026-11-10）
+
+一个已发布到 `next` 的预发布版本因功能迁出被撤回，`package.json` 回到当时已稳定的 `0.3.4`，
+不再为该预发布线保留版本号。撤包后的独立 HTTP 核验：该版本端点返回 404、`versions` 不含它、
+`next` dist-tag 已不存在、`latest` 未变。整个包及其他版本均保留；未自动修改用户本地配置或缓存。
+
+独立插件的安装、停用旧覆盖及重新选择模型说明归属[迁移入口](./subagent-model-policy.md)，
+实际使用步骤见其链接的独立项目 README（该仓推送前在线内容可能尚不可见）。
+后续发布或 dist-tag 操作仍需另行授权，不因本次撤包或源码迁移而自动执行。
+
+撤包必须针对已授权的单个版本，不能误撤整个包。
+是否满足撤包条件须按[npm 官方政策](https://docs.npmjs.com/policies/unpublish/)核验：
+新建包 72 小时内须无公开依赖包；超过该期限须同时满足无公开依赖包、过去一周下载量少于 300、单一维护者。
+不要仅凭某个新版本刚发布就假定整个已存在包符合“新建包”条件。撤包不可逆，精确引用该版本的新安装会失败；
+版本号仍遵守上文“永不复用”规则。本机已安装副本不会因远端撤包自动移除。
+
+#### 撤包不能只看 CLI 成功提示（2026-11-10 实测）
+
+本机 npm `11.16.0` 在认证无效时，单版本 `unpublish` 仍打印 `- package@version` 且退出 0，
+但调试日志中的实际写请求为 `PUT .../-rev/... → 404`；公开版本端点及完整版本列表仍包含该版本。
+同一次排查的 `npm whoami` 返回 `E401`，故该次操作不能视为撤包成功。
+执行前先确认登录身份，执行后必须独立查版本列表、指定版本端点与 dist-tag；不能仅凭减号提示或退出码判断。
+认证需用户在交互式终端完成 `npm login`，不把登录凭据写入项目或日志。
+
 ## 4. 测试
 
 | 层 | 手段 | 覆盖什么 |
@@ -189,7 +213,7 @@ gh workflow run release.yml -f publish=true
 | `0.1.0-beta.0` | 人工（浏览器 2FA） | 首发建包；`latest` 被 npm 自动打上（首个版本） |
 | `0.1.0-beta.1` / `beta.2` | push tag → CD | OIDC 自动发布到 `next`，provenance 已签名；`latest` **未被动** |
 | `0.1.0`（正式版） | 手动 dispatch（`publish`+`stable`） | 发到 `latest` + 补建 tag `v0.1.0` + 建 GitHub Release；provenance 已签名 |
-| `0.4.0-beta.0` | push tag → CD | OIDC 自动发布到 `next`；`latest` 仍为 `0.3.4`；packument 传播约 2 分钟后才可见 |
+| （一次预发布，已撤回） | push tag → CD | 发布到 `next`；随后因功能迁出撤回，版本号不再复用 |
 
 > 本地/使用方切换版本：把 `plugins` 里的 spec 改成 `@justsilver/opencode-providers`（跟随 `latest`）或钉 `@x.y.z`；
 > 实测改完 spec 会被配置监视发现并自动装新代（`~/.cache/opencode/npm/@justsilver/opencode-providers@latest/<gen>`），

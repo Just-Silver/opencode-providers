@@ -52,7 +52,6 @@ OpenCode 的供应商清单来自 models.dev 目录，**目录里没有的供应
 ```
 /connect-providers        # 选供应商 → 贴 API Key
 /models                   # 该供应商的模型随即出现在列表里
-/subagent-model           # 可选：给所有子代理统一指定模型
 ```
 
 - 触发方式与内置 `/connect` 相同：**在输入框敲 `/`，在补全菜单里选中它**（选中即执行）；
@@ -69,19 +68,9 @@ OpenCode 的供应商清单来自 models.dev 目录，**目录里没有的供应
 凭据存在 opencode 自己的 SQLite 里（`opencode debug paths db`），和内置 `/connect` 完全一致。
 API Key 只在你贴入时经过本插件的内存，不落任何本项目自己的文件。
 
-### 子代理统一模型（可选）
+### 子代理功能已独立
 
-`/subagent-model` 给所有 `subagent` 调用指定同一个模型。设置是全局的（同一服务端数据库下的项目共享，
-存在 opencode 自己的数据库里），保存后立即对后续子代理调用生效，不需要重启：
-
-- 列表是**当前目录**可用的全部聊天模型，不只本插件注册的供应商；按供应商分组，可按模型名或完整 ID 搜索。
-- 有变体的模型会再问一次「默认 / 各 variant」；选默认时不会拼 `#`。
-- 选「关闭强制覆盖（恢复 OpenCode 原有选择规则）」即停用，子代理回到 OpenCode 原本的模型选择规则。
-- 已选模型后来失效时仍会显示原引用，可以重新选择或关闭；宿主缺少执行前钩子时会直接提示功能不可用，
-  不会假装保存成功。
-
-「不需要重启」只针对**保存策略**。如果是升级插件后第一次拿到 `/subagent-model` 命令，TUI 入口是在启动时加载的，
-需要完全重启一次 opencode 才会出现新命令（与 TUI 侧代码更新一致；服务端热重载不覆盖这一点）。
+原 beta 中的 `/subagent-model` 已迁为独立插件，providers 不再包含此功能，见[迁移入口](docs/subagent-model-policy.md)。
 
 ## 范围之外
 
@@ -98,7 +87,6 @@ API Key 只在你贴入时经过本插件的内存，不落任何本项目自己
 | `/connect-providers` 说没有可用供应商 | 注册表没加载成功。看 server 日志里的 `[opencode-providers]`，并确认 `/api/plugin` 里自己那条 `state.status` 是 `active` |
 | `/models` 里看不到新供应商 | 正常：`activation: "auto"`，在 `/connect-providers` 里存过 key 之后才会出现 |
 | 注册表改了，`/models` 没跟上 | 插件**没有后台定时器**，只在加载时判一次 6h TTL。想立刻生效就在 `/connect-providers` 弹窗里按 `Ctrl+R`（Force refresh），或 `opencode service restart` |
-| `/subagent-model` 提示不支持 | 当前宿主没有执行前钩子能力（或钩子注册失败），本功能不可用；供应商注册不受影响 |
 
 ## 开发与贡献
 
