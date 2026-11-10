@@ -189,6 +189,7 @@ gh workflow run release.yml -f publish=true
 | `0.1.0-beta.0` | 人工（浏览器 2FA） | 首发建包；`latest` 被 npm 自动打上（首个版本） |
 | `0.1.0-beta.1` / `beta.2` | push tag → CD | OIDC 自动发布到 `next`，provenance 已签名；`latest` **未被动** |
 | `0.1.0`（正式版） | 手动 dispatch（`publish`+`stable`） | 发到 `latest` + 补建 tag `v0.1.0` + 建 GitHub Release；provenance 已签名 |
+| `0.4.0-beta.0` | push tag → CD | OIDC 自动发布到 `next`；`latest` 仍为 `0.3.4`；packument 传播约 2 分钟后才可见 |
 
 > 本地/使用方切换版本：把 `plugins` 里的 spec 改成 `@justsilver/opencode-providers`（跟随 `latest`）或钉 `@x.y.z`；
 > 实测改完 spec 会被配置监视发现并自动装新代（`~/.cache/opencode/npm/@justsilver/opencode-providers@latest/<gen>`），
