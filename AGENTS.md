@@ -24,7 +24,9 @@
   证据：`packages/core/src/plugin/supervisor.ts:96-111`（`failures` 里塞入重复项，`state.status="failed"`）。
 - 同目录**双入口**（`packages/plugin/src/host.ts:43` 的 `server: entry(["server",""])` / `tui: entry(["tui"])`）：
   - `index.ts` = **server 入口**：拉注册表 → 注册 integration / provider / models。**不得触碰 `context.ui`**
-  - `tui.ts` = **TUI 入口**：只注册 `/connect-providers` 命令与交互（**不读注册表**，命令里读服务端已注册的 integration）；
+  - `tui.ts` = **TUI 入口**：注册 `/connect-providers` 与 `/subagent-model` 命令与交互（**不读注册表**；
+    `/connect-providers` 读服务端已注册的 integration，`/subagent-model` 经 RPC 读写服务端策略，
+    设计与存储契约见 `docs/subagent-model-policy.md`）；
     图层必须写 **`mode: "global"`**（图层 mode 默认 `"base"`，而提示框 push 的是 `"composer"`／补全时 `"autocomplete"`
     → 漏了就会"插件 active 但看不到命令"；证据：`packages/tui/src/context/keymap.tsx:209-214` + `component/prompt/autocomplete.tsx:474-483`）
 - **server 入口不得 import 任何 `@opencode/*`（实测踩坑，opencode 2.0.24）**：`@opencode/plugin` 只注入给 TUI 入口，
@@ -196,5 +198,7 @@
 | `docs/opencode-connect-custom-provider.md` | opencode `/connect` 与自定义供应商（通用知识） | 本插件安装 |
 | `docs/opencode-plugin-provider-no-config.md` | 本插件「零配置」设计与证据 | opencode 通用教程 |
 | `docs/npm-distribution-and-testing.md` | 本项目 npm 分发 / 测试实践 | 注册表数据 |
+| `docs/subagent-model-policy.md` | 子代理统一模型策略设计 / 存储契约 / 执行边界 | 使用教程 / 注册表数据 |
+| `docs/subagent-model-implementation.md` | 子代理统一模型实现任务 / 接口 / 验收计划 | 使用教程 / 设计决策 |
 | `docs/specs/`、`docs/plans/` | 历史设计 / 计划（只读冻结） | 新内容 |
 | `tools/open-design/README.md` | Open Design 供应商的诊断工具：延迟测量 / 上游探测 / 流式工具调用分片验证（含为什么走 responses 协议） | 插件实现、注册表数据 |
