@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+## [0.4.0-beta.0] - 2026-11-10
+
+### Added
+
+- 插件：**子代理统一模型**——新增 `/subagent-model` 可视化配置，可选择一个全局聊天模型及变体，或关闭覆盖。
+  策略保存在 OpenCode SQLite 的插件 KV 中，同一服务端数据库下的项目共享；服务端在 `subagent` 的
+  `execute.before` 钩子里读取策略并替换 `model`，主代理显式指定其他模型时同样被确定性覆盖，不依赖提示词。
+  模型不可用、策略损坏或宿主缺少钩子时明确报错，不静默回退；供应商注册不受影响。
+  设计、存储契约与执行边界见 `docs/subagent-model-policy.md`。
+
 ### Changed
 
 - **技能/技能 CLI：`--base` 现在只允许覆盖 `modelID`（入口硬拦）**——`add-provider` / `add-model` / `set-model` 给 `--base` 的模型再传 `--model-name` / `--context` / `--output` / `--variant` / `--input` 一律报错并指路（要独立的显示名/额度就 `--lab <lab>` 另建 canon，或 `set-shared-model` 改 canon）；`set-model` 的 `--unset` 清空仍放行（解除复用走 `--unset base` + 补齐 `--model-name`/`--context`/`--output`）。原因：`resolveModelSpec` 是整字段替换，provider 层覆盖 `name`/`limit` 后装配值就与 canon 不一致，随仓数据的继承不变式（`tests/registry.test.ts`「引用了 base 的模型继承 canon 的 name/limit」）必然变红。`check` 新增一条提醒兜住**手改**出来的同类坏数据（CI 跑 `check --strict`，故也会被拦）。

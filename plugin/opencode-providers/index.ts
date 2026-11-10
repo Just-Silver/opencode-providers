@@ -29,6 +29,7 @@ import { DEFAULT_REGISTRY_URL, loadRegistry } from "./registry/source.ts"
 import type { RegistryCacheEntry, RegistryStore } from "./registry/source.ts"
 import type { Registry } from "./registry/schema.ts"
 import { registryRpc, type RefreshSummary } from "./rpc.ts"
+import { registerSubagentModelPolicy, type SubagentModelContext } from "./subagent-model.ts"
 
 const PLUGIN_ID = "opencode-providers"
 
@@ -60,12 +61,8 @@ interface ProviderEditorLike {
 }
 
 /** Only the members this plugin uses; see the file comment for why it is structural. */
-interface SetupContextLike {
+interface SetupContextLike extends SubagentModelContext {
   readonly options: Readonly<Record<string, unknown>>
-  readonly storage: {
-    get(key: string): Promise<unknown>
-    set(key: string, value: unknown): Promise<void>
-  }
   readonly integration: {
     transform(callback: (editor: IntegrationEditorLike) => void): Promise<unknown>
     reload(): Promise<unknown>
@@ -129,8 +126,13 @@ export default {
       }
     }
 
+    // The subagent policy hook is independent of the registry: a registry outage
+    // must not disable enforcement, and a host without the hook reports
+    // `supported: false` instead of a save that would never be applied.
+    const subagentModel = await registerSubagentModelPolicy(ctx)
+
     try {
-      await ctx.rpc?.register(registryRpc, { refresh })
+      await ctx.rpc?.register(registryRpc, { refresh, ...subagentModel })
     } catch (error) {
       // Refresh being unavailable must never block provider registration.
       console.warn(

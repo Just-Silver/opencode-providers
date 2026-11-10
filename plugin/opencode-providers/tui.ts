@@ -1,13 +1,8 @@
-/**
- * TUI entry — registers `/connect-providers`.
- *
- * The command only *reads* state (integrations the server entry registered) and
- * talks to the server over the client API, so the key still lands in opencode's
- * credential table through the normal `/connect` path.
- */
+// Credentials still land in opencode's credential table through the normal `/connect` path.
 
 import { Plugin } from "@opencode/plugin/tui"
 import { connectProviders } from "./view/connect.ts"
+import { configureSubagentModel } from "./view/subagent-model.ts"
 
 const PLUGIN_ID = "opencode-providers"
 
@@ -27,6 +22,14 @@ export default Plugin.define({
           slash: { name: "connect-providers" },
           palette: true,
           run: () => connectProviders(context),
+        },
+        {
+          id: `${PLUGIN_ID}.subagent-model`,
+          title: "子代理统一模型",
+          group: "Model",
+          slash: { name: "subagent-model" },
+          palette: true,
+          run: () => configureSubagentModel(context),
         },
       ],
     }))
